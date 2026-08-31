@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>frameshop</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-token="__TOKEN__">
+
+<header>
+  <strong>frameshop</strong>
+  <span id="dir" class="muted mono"></span>
+  <span class="spacer"></span>
+  <span id="count" class="pill"></span>
+</header>
+
+<main>
+  <section id="stage">
+    <div class="bar">
+      <button id="play">Play</button>
+      <label>fps <input id="fps" type="number" min="1" max="60" step="1" value="24" class="num"></label>
+      <label><input id="onlyPicked" type="checkbox" checked> picked only</label>
+      <span class="spacer"></span>
+      <label>bg
+        <select id="bg">
+          <option value="checker">checker</option>
+          <option value="#000000">black</option>
+          <option value="#ffffff">white</option>
+          <option value="#ff00ff">magenta</option>
+        </select>
+      </label>
+      <label><input id="cropOn" type="checkbox"> crop</label>
+      <button id="cropReset" class="ghost">reset</button>
+    </div>
+
+    <div id="canvasWrap">
+      <canvas id="view"></canvas>
+    </div>
+
+    <div class="bar">
+      <input id="scrub" type="range" min="0" max="0" value="0">
+      <span id="frameLabel" class="muted mono"></span>
+    </div>
+  </section>
+
+  <section id="side">
+    <div class="bar wrap">
+      <button data-pick="all">All</button>
+      <button data-pick="none">None</button>
+      <button data-pick="invert">Invert</button>
+      <span class="spacer"></span>
+      <span class="muted small">click = solo &middot; ctrl = toggle &middot; shift = range</span>
+    </div>
+    <div id="grid"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="bar wrap">
+    <label>crop
+      <input id="cx" type="number" class="num" title="x">
+      <input id="cy" type="number" class="num" title="y">
+      <input id="cw" type="number" class="num" title="width">
+      <input id="ch" type="number" class="num" title="height">
+    </label>
+    <label>size
+      <input id="rw" type="number" class="num"> &times; <input id="rh" type="number" class="num">
+    </label>
+    <label><input id="linkAspect" type="checkbox" checked> lock ratio</label>
+    <button id="sizeReset" class="ghost">reset</button>
+  </div>
+
+  <div class="bar wrap">
+    <label><input type="checkbox" class="fmt" value="sheet" checked> sheet</label>
+    <label>cols <input id="cols" type="number" min="0" class="num" value="0" title="0 = auto"></label>
+    <label><input type="checkbox" class="fmt" value="gif"> gif</label>
+    <label><input type="checkbox" class="fmt" value="apng"> apng</label>
+    <span class="spacer"></span>
+    <label>name <input id="stem" type="text"></label>
+    <label>out <input id="outdir" type="text" class="wide" placeholder="D:\output"></label>
+    <button id="export" class="primary">Export</button>
+  </div>
+
+  <pre id="log"></pre>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
