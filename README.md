@@ -35,10 +35,17 @@ Opens <http://127.0.0.1:8765>. Requires Pillow; everything else is stdlib.
 | `x` | toggle the frame under the cursor |
 | `left` / `right` | step the cursor |
 | space | play / pause |
+| `-` / `+` / `0` | zoom out / in / fit |
 
 **Playing.** *picked only* loops just the selection, so you see the cut before
 you commit to it. Set the background to black, white or magenta to judge a matte
 edge — magenta is the one that exposes residual green.
+
+**Zooming.** `−` `+` `fit` `1:1` under the preview, or `-` `+` `0` on the
+keyboard, or ctrl+wheel to zoom about the pointer. Plain wheel and the
+scrollbars pan. Above 1:1 the canvas switches to the full-resolution source and
+turns off smoothing, so you are looking at real pixels rather than an
+interpolated guess — which is the only way to judge a matte edge.
 
 **Cropping.** Tick `crop`, then drag a rect on the preview. Drag an edge or a
 corner handle to adjust it, or drag the middle to move the whole box; the four

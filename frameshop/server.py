@@ -73,6 +73,8 @@ class Handler(BaseHTTPRequestHandler):
             if route in ("/api/thumb", "/api/preview"):
                 longest = THUMB_MAX if route == "/api/thumb" else PREVIEW_MAX
                 return self._rendition(query, longest)
+            if route == "/api/full":
+                return self._full(query)
 
         self._send(404, b"not found", TEXT)
 
@@ -104,6 +106,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self.library.get(name):
             return self._send(404, b"unknown frame", TEXT)
         self._send(200, self.library.rendition(name, longest), "image/png")
+
+    def _full(self, query):
+        """The untouched source file — the preview rendition is too small to
+        zoom into, which is the whole point of zooming."""
+        name = (query.get("name") or [""])[0]
+        frame = self.library.get(name)
+        if not frame:
+            return self._send(404, b"unknown frame", TEXT)
+        ctype = mimetypes.guess_type(frame.path)[0] or "application/octet-stream"
+        with open(frame.path, "rb") as handle:
+            self._send(200, handle.read(), ctype)
 
     # -- POST -------------------------------------------------------------
 

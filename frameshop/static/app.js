@@ -6,11 +6,16 @@ const state = {
   picked: new Set(),   // names
   cursor: 0,           // index the preview is parked on
   anchor: 0,           // shift-click range origin
-  images: new Map(),   // name -> {img, ready, done}
+  images: new Map(),   // name -> {img, ready, done}   preview rendition
+  full: new Map(),     // name -> {img, ready, done}   full-resolution source
   lastImg: null,       // last fully decoded image, so playback never blanks
   crop: null,          // {x, y, w, h} in source pixels
+  zoom: 0,             // 0 = fit to the pane; otherwise an absolute scale
   playing: false,
 };
+
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 16;
 
 const authed = (options = {}) => ({
   ...options,
@@ -126,25 +131,31 @@ function moveCursor(i) {
 
 // -- preview -----------------------------------------------------------------
 
-function loadImage(name) {
-  const cached = state.images.get(name);
+function cachedImage(cache, name, url) {
+  const cached = cache.get(name);
   if (cached) return cached;
 
   const entry = { img: new Image(), ready: false };
-  entry.done = blobUrl(`/api/preview?name=${encodeURIComponent(name)}`)
-    .then((url) => new Promise((resolve) => {
-      entry.img.onload = () => {
-        entry.ready = true;
-        if (state.frames[state.cursor]?.name === name) draw();
-        resolve(entry);
-      };
-      entry.img.onerror = () => resolve(entry);
-      entry.img.src = url;
-    }));
+  entry.done = blobUrl(url).then((blob) => new Promise((resolve) => {
+    entry.img.onload = () => {
+      entry.ready = true;
+      if (state.frames[state.cursor]?.name === name) draw();
+      resolve(entry);
+    };
+    entry.img.onerror = () => resolve(entry);
+    entry.img.src = blob;
+  }));
 
-  state.images.set(name, entry);
+  cache.set(name, entry);
   return entry;
 }
+
+const loadPreview = (name) =>
+  cachedImage(state.images, name, `/api/preview?name=${encodeURIComponent(name)}`);
+
+/** Full-resolution source, fetched only once the zoom outruns the preview. */
+const loadFull = (name) =>
+  cachedImage(state.full, name, `/api/full?name=${encodeURIComponent(name)}`);
 
 /** Warm every preview up front: playback that fetches per frame just blinks. */
 async function prefetch(concurrency = 6) {
@@ -152,7 +163,7 @@ async function prefetch(concurrency = 6) {
   let done = 0;
   await Promise.all(Array.from({ length: concurrency }, async () => {
     while (queue.length) {
-      await loadImage(queue.shift()).done;
+      await loadPreview(queue.shift()).done;
       $("count").title = `${++done}/${state.frames.length} previews loaded`;
     }
   }));
@@ -207,13 +218,19 @@ function drawCropOverlay(ctx, canvas, frame) {
   }
 }
 
+/** Scale actually used to paint: the explicit zoom, or fit-to-pane. */
+function effectiveScale(frame) {
+  if (state.zoom) return state.zoom;
+  const wrap = $("canvasWrap");
+  return Math.min(wrap.clientWidth / frame.w, wrap.clientHeight / frame.h, 1);
+}
+
 function draw() {
   const frame = state.frames[state.cursor];
   if (!frame) return;
 
   const canvas = $("view");
-  const wrap = $("canvasWrap");
-  const scale = Math.min(wrap.clientWidth / frame.w, wrap.clientHeight / frame.h, 1);
+  const scale = effectiveScale(frame);
   canvas.width = Math.max(1, Math.round(frame.w * scale));
   canvas.height = Math.max(1, Math.round(frame.h * scale));
 
@@ -221,16 +238,67 @@ function draw() {
   paintBackground(ctx, canvas.width, canvas.height);
 
   // Hold the previous frame rather than flash empty while this one decodes.
-  const entry = loadImage(frame.name);
-  const shown = entry.ready ? entry.img : state.lastImg;
-  if (shown) ctx.drawImage(shown, 0, 0, canvas.width, canvas.height);
+  const entry = loadPreview(frame.name);
+  let shown = entry.ready ? entry.img : state.lastImg;
   if (entry.ready) state.lastImg = entry.img;
+
+  // Past the rendition's own width the preview is just a blurry upscale, which
+  // defeats the point of zooming in. Swap in the source once it has arrived.
+  if (canvas.width > entry.img.naturalWidth) {
+    const full = loadFull(frame.name);
+    if (full.ready) shown = full.img;
+  }
+
+  // Above 1:1 you are looking at pixels, so stop the browser inventing them.
+  ctx.imageSmoothingEnabled = scale <= 1;
+  if (shown) ctx.drawImage(shown, 0, 0, canvas.width, canvas.height);
 
   drawCropOverlay(ctx, canvas, frame);
 
   $("scrub").value = state.cursor;
   $("frameLabel").textContent = `${state.cursor + 1}/${state.frames.length}  ${frame.name}`;
+  $("zoomLabel").textContent = state.zoom
+    ? `${Math.round(scale * 100)}%`
+    : `fit ${Math.round(scale * 100)}%`;
 }
+
+/** Zoom about a viewport point, so whatever sits under it stays under it. */
+function zoomTo(point, after) {
+  const frame = state.frames[state.cursor];
+  if (!frame) return;
+  const before = effectiveScale(frame);
+  after = clamp(after, MIN_ZOOM, MAX_ZOOM);
+  if (after === before) return;
+
+  const view = $("view").getBoundingClientRect();
+  const source = { x: (point.x - view.left) / before, y: (point.y - view.top) / before };
+
+  state.zoom = after;
+  draw();
+
+  const wrap = $("canvasWrap");
+  const box = wrap.getBoundingClientRect();
+  wrap.scrollLeft = source.x * after - (point.x - box.left);
+  wrap.scrollTop = source.y * after - (point.y - box.top);
+}
+
+const paneCentre = () => {
+  const box = $("canvasWrap").getBoundingClientRect();
+  return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+};
+
+/** Buttons and keys zoom about the middle of the pane, not the top-left. */
+function setZoom(z) {
+  if (!z) {
+    state.zoom = 0;
+    $("canvasWrap").scrollTo(0, 0);
+    return draw();
+  }
+  zoomTo(paneCentre(), z);
+}
+
+const zoomBy = (factor) =>
+  setZoom(effectiveScale(state.frames[state.cursor]) * factor);
 
 let timer = null;
 function setPlaying(on) {
@@ -447,6 +515,18 @@ function bindControls() {
   $("cropOn").onchange = draw;
   $("cropAuto").onclick = autoCrop;
   $("cropReset").onclick = resetCrop;
+
+  $("zoomIn").onclick = () => zoomBy(1.25);
+  $("zoomOut").onclick = () => zoomBy(1 / 1.25);
+  $("zoomFit").onclick = () => setZoom(0);
+  $("zoom1").onclick = () => setZoom(1);
+  // Ctrl+wheel zooms, plain wheel is left alone so it still pans the overflow.
+  $("canvasWrap").addEventListener("wheel", (ev) => {
+    if (!ev.ctrlKey) return;
+    ev.preventDefault();
+    const scale = effectiveScale(state.frames[state.cursor]);
+    zoomTo({ x: ev.clientX, y: ev.clientY }, scale * (ev.deltaY < 0 ? 1.15 : 1 / 1.15));
+  }, { passive: false });
   $("sizeReset").onclick = syncSizeFromCrop;
   ["cx", "cy", "cw", "ch"].forEach((id) => { $(id).onchange = readCropInputs; });
   document.querySelectorAll("[data-pick]").forEach((b) => {
@@ -465,6 +545,9 @@ function bindControls() {
     else if (ev.key === "ArrowRight") moveCursor(Math.min(state.cursor + 1, state.frames.length - 1));
     else if (ev.key === "ArrowLeft") moveCursor(Math.max(state.cursor - 1, 0));
     else if (ev.key === "x") { pickToggle(state.cursor); syncPicks(); }
+    else if (ev.key === "+" || ev.key === "=") zoomBy(1.25);
+    else if (ev.key === "-") zoomBy(1 / 1.25);
+    else if (ev.key === "0") setZoom(0);
   };
 }
 
