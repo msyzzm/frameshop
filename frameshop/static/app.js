@@ -662,7 +662,10 @@ async function openLibrary(data) {
 
   $("dir").textContent = data.directory;
   $("stem").value = data.directory.split(/[\\/]/).filter(Boolean).pop() || "frames";
-  $("outdir").value = data.directory.replace(/[\\/][^\\/]*$/, "") + "\\frameshop_out";
+  // Follow the server's separator. A hard-coded backslash builds a directory
+  // literally named "work\frameshop_out" when the server runs on Linux.
+  const sep = data.directory.includes("\\") ? "\\" : "/";
+  $("outdir").value = data.directory.replace(/[\\/][^\\/]*$/, "") + sep + "frameshop_out";
   $("scrub").max = state.frames.length - 1;
   if (!data.uniform) log("frames are not all the same size - set an explicit size before export", "err");
 
