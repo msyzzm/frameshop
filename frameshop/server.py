@@ -13,8 +13,10 @@ import mimetypes
 import os
 import posixpath
 import secrets
+import shutil
 import tempfile
 import threading
+import zipfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -138,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._rendition(query, longest)
             if route == "/api/full":
                 return self._full(query)
+            if route == "/api/download":
+                return self._download(query)
 
         self._send(404, b"not found", TEXT)
 
@@ -174,6 +178,49 @@ class Handler(BaseHTTPRequestHandler):
         if not self.library or not self.library.get(name):
             return self._send(404, b"unknown frame", TEXT)
         self._send(200, self.library.rendition(name, longest), "image/png")
+
+    def _send_file(self, path, filename):
+        """Stream a file as an attachment. Streamed, not read: a full-res APNG
+        of a long clip is not something to hold in memory to hand over."""
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         mimetypes.guess_type(path)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(os.path.getsize(path)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        with open(path, "rb") as handle:
+            shutil.copyfileobj(handle, self.wfile, UPLOAD_CHUNK)
+
+    def _download(self, query):
+        """Hand exported files back to the browser.
+
+        Everything runs server-side, so without this the results of a remote
+        session sit on the server and you go find them over ssh.
+        """
+        try:
+            paths = [self._within_root(p) for p in query.get("path") or []]
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+
+        missing = [p for p in paths if not os.path.isfile(p)]
+        if not paths or missing:
+            return self._json(404, {"error": f"no such file: {missing or 'nothing requested'}"})
+
+        if len(paths) == 1:
+            return self._send_file(paths[0], os.path.basename(paths[0]))
+
+        stem = (query.get("name") or ["frameshop"])[0]
+        fd, archive = tempfile.mkstemp(prefix="frameshop_zip_", suffix=".zip")
+        os.close(fd)
+        try:
+            # Stored, not deflated: PNG/GIF are already compressed, so deflate
+            # would spend the CPU for roughly nothing.
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_STORED) as bundle:
+                for path in paths:
+                    bundle.write(path, os.path.basename(path))
+            self._send_file(archive, f"{os.path.basename(stem) or 'frameshop'}.zip")
+        finally:
+            os.unlink(archive)
 
     def _full(self, query):
         """The untouched source file — the preview rendition is too small to

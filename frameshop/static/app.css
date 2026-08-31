@@ -130,3 +130,5 @@ input.wide { width: 260px; }
 }
 #log .err { color: #ff7b72; }
 #log .ok { color: #6ee787; }
+#log .act { display: block; color: var(--accent); cursor: pointer; }
+#log .act:hover { text-decoration: underline; }

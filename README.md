@@ -136,6 +136,12 @@ Pick a name and an output folder, tick formats, hit Export.
 
 Frames go out in sequence order, not the order you clicked them.
 
+Everything runs server-side, so the files land on the server — the wrong
+machine when you are driving it over the network. The log turns each result
+into a download link, plus one that zips the lot, so a remote session doesn't
+have to end in an `scp`. The zip is stored rather than deflated: PNG and GIF
+are already compressed, so deflate would spend the CPU for nothing.
+
 ## Layout
 
 ```

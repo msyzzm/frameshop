@@ -39,6 +39,35 @@ const log = (msg, cls = "") => {
   $("log").prepend(line);
 };
 
+const logAction = (msg, onClick) => {
+  const line = document.createElement("a");
+  line.className = "act";
+  line.textContent = msg;
+  line.onclick = onClick;
+  $("log").prepend(line);
+};
+
+/** Pull exported files back to this machine.
+ *
+ * Fetched rather than linked: the API wants a token header, and an <a href>
+ * cannot send one. The response becomes a blob URL and a synthetic click.
+ */
+async function download(paths, stem = "frameshop") {
+  const params = new URLSearchParams();
+  paths.forEach((p) => params.append("path", p));
+  if (paths.length > 1) params.set("name", stem);
+
+  const res = await fetch(`/api/download?${params}`, authed());
+  if (!res.ok) return log((await res.json()).error, "err");
+
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = paths.length > 1 ? `${stem}.zip` : paths[0].split(/[\\/]/).pop();
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 // -- selection ---------------------------------------------------------------
 
 function pickOnly(i) {
@@ -497,8 +526,17 @@ async function doExport() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    log(`${out.count} frames @ ${out.size[0]}x${out.size[1]}`, "ok");
-    out.written.forEach((f) => log(`  ${f.path}  (${(f.bytes / 1048576).toFixed(1)} MB)`, "ok"));
+    // Everything above ran on the server, so the files are on the server. Offer
+    // them back rather than making a remote session end in an scp.
+    const paths = out.written.map((f) => f.path);
+    const stem = $("stem").value || "frameshop";
+    out.written.forEach((f) => logAction(
+      `  download ${f.path.split(/[\\/]/).pop()}  (${(f.bytes / 1048576).toFixed(1)} MB)`,
+      () => download([f.path])));
+    if (paths.length > 1) {
+      logAction(`  download all ${paths.length} as ${stem}.zip`, () => download(paths, stem));
+    }
+    log(`${out.count} frames @ ${out.size[0]}x${out.size[1]} -> ${out.written[0].path}`, "ok");
   } catch (err) {
     log(err.message, "err");
   } finally {
