@@ -31,6 +31,7 @@ Opens <http://127.0.0.1:8765>. Requires Pillow; everything else is stdlib.
 | ctrl / cmd + click | toggle one |
 | shift + click | pick the range back to the last click |
 | `All` / `None` / `Invert` | bulk |
+| `1/2` / `1/3` | keep every 2nd or 3rd of what's already picked, evenly spaced |
 | `x` | toggle the frame under the cursor |
 | `left` / `right` | step the cursor |
 | space | play / pause |

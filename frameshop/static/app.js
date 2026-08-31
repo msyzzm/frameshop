@@ -67,6 +67,14 @@ function pickAll(mode) {
 /** Names in sequence order — export must not follow click order. */
 const pickedNames = () => state.frames.map((f) => f.name).filter((n) => state.picked.has(n));
 
+/** Thin the picks to every nth, evenly spaced, counted over the picks only. */
+function thin(n) {
+  const picked = pickedNames();
+  if (!picked.length) return;
+  state.picked = new Set(picked.filter((_, i) => i % n === 0));
+  syncPicks();
+}
+
 // -- grid --------------------------------------------------------------------
 
 function buildGrid() {
@@ -354,6 +362,9 @@ function bindControls() {
   ["cx", "cy", "cw", "ch"].forEach((id) => { $(id).onchange = readCropInputs; });
   document.querySelectorAll("[data-pick]").forEach((b) => {
     b.onclick = () => pickAll(b.dataset.pick);
+  });
+  document.querySelectorAll("[data-thin]").forEach((b) => {
+    b.onclick = () => thin(Number(b.dataset.thin));
   });
   $("scrub").oninput = (ev) => moveCursor(Number(ev.target.value));
   $("export").onclick = doExport;
