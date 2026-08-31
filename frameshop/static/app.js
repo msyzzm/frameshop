@@ -6,7 +6,8 @@ const state = {
   picked: new Set(),   // names
   cursor: 0,           // index the preview is parked on
   anchor: 0,           // shift-click range origin
-  images: new Map(),   // name -> HTMLImageElement (preview rendition)
+  images: new Map(),   // name -> {img, ready, done}
+  lastImg: null,       // last fully decoded image, so playback never blanks
   crop: null,          // {x, y, w, h} in source pixels
   playing: false,
 };
@@ -90,12 +91,12 @@ function buildGrid() {
     if (ev.shiftKey) pickRange(i);
     else if (ev.ctrlKey || ev.metaKey) pickToggle(i);
     else pickOnly(i);
-    state.cursor = i;
+    moveCursor(i);
     syncPicks();
-    draw();
   };
 }
 
+/** Full repaint of the grid. Too heavy to run on every played frame. */
 function syncPicks() {
   const tiles = $("grid").children;
   state.frames.forEach((frame, i) => {
@@ -105,17 +106,49 @@ function syncPicks() {
   $("count").textContent = `${state.picked.size} / ${state.frames.length} picked`;
 }
 
+/** Cheap cursor move: touch the two tiles that changed, not all of them. */
+function moveCursor(i) {
+  const tiles = $("grid").children;
+  tiles[state.cursor]?.classList.remove("cursor");
+  state.cursor = i;
+  tiles[i]?.classList.add("cursor");
+  tiles[i]?.scrollIntoView({ block: "nearest" });
+  draw();
+}
+
 // -- preview -----------------------------------------------------------------
 
 function loadImage(name) {
-  if (state.images.has(name)) return state.images.get(name);
-  const img = new Image();
-  state.images.set(name, img);
-  blobUrl(`/api/preview?name=${encodeURIComponent(name)}`).then((url) => {
-    img.onload = draw;
-    img.src = url;
-  });
-  return img;
+  const cached = state.images.get(name);
+  if (cached) return cached;
+
+  const entry = { img: new Image(), ready: false };
+  entry.done = blobUrl(`/api/preview?name=${encodeURIComponent(name)}`)
+    .then((url) => new Promise((resolve) => {
+      entry.img.onload = () => {
+        entry.ready = true;
+        if (state.frames[state.cursor]?.name === name) draw();
+        resolve(entry);
+      };
+      entry.img.onerror = () => resolve(entry);
+      entry.img.src = url;
+    }));
+
+  state.images.set(name, entry);
+  return entry;
+}
+
+/** Warm every preview up front: playback that fetches per frame just blinks. */
+async function prefetch(concurrency = 6) {
+  const queue = state.frames.map((f) => f.name);
+  let done = 0;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (queue.length) {
+      await loadImage(queue.shift()).done;
+      $("count").title = `${++done}/${state.frames.length} previews loaded`;
+    }
+  }));
+  log(`${state.frames.length} previews loaded`, "ok");
 }
 
 /** Frame indices the player walks, honouring the "picked only" toggle. */
@@ -169,8 +202,11 @@ function draw() {
   const ctx = canvas.getContext("2d");
   paintBackground(ctx, canvas.width, canvas.height);
 
-  const img = loadImage(frame.name);
-  if (img.complete && img.naturalWidth) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // Hold the previous frame rather than flash empty while this one decodes.
+  const entry = loadImage(frame.name);
+  const shown = entry.ready ? entry.img : state.lastImg;
+  if (shown) ctx.drawImage(shown, 0, 0, canvas.width, canvas.height);
+  if (entry.ready) state.lastImg = entry.img;
 
   drawCropOverlay(ctx, canvas, frame);
 
@@ -184,13 +220,12 @@ function setPlaying(on) {
   $("play").textContent = on ? "Pause" : "Play";
   clearInterval(timer);
   if (!on) return;
+
   timer = setInterval(() => {
     const list = playlist();
     if (!list.length) return;
     const at = list.indexOf(state.cursor);
-    state.cursor = list[(at + 1) % list.length];
-    syncPicks();
-    draw();
+    moveCursor(list[(at + 1) % list.length]);
   }, 1000 / Math.max(1, Number($("fps").value)));
 }
 
@@ -320,18 +355,16 @@ function bindControls() {
   document.querySelectorAll("[data-pick]").forEach((b) => {
     b.onclick = () => pickAll(b.dataset.pick);
   });
-  $("scrub").oninput = (ev) => { state.cursor = Number(ev.target.value); syncPicks(); draw(); };
+  $("scrub").oninput = (ev) => moveCursor(Number(ev.target.value));
   $("export").onclick = doExport;
   window.onresize = draw;
 
   window.onkeydown = (ev) => {
     if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
     if (ev.key === " ") { ev.preventDefault(); setPlaying(!state.playing); }
-    if (ev.key === "ArrowRight") state.cursor = Math.min(state.cursor + 1, state.frames.length - 1);
-    if (ev.key === "ArrowLeft") state.cursor = Math.max(state.cursor - 1, 0);
-    if (ev.key === "x") pickToggle(state.cursor);
-    syncPicks();
-    draw();
+    else if (ev.key === "ArrowRight") moveCursor(Math.min(state.cursor + 1, state.frames.length - 1));
+    else if (ev.key === "ArrowLeft") moveCursor(Math.max(state.cursor - 1, 0));
+    else if (ev.key === "x") { pickToggle(state.cursor); syncPicks(); }
   };
 }
 
@@ -353,6 +386,8 @@ async function boot() {
   bindAspect();
   bindControls();
   draw();
+
+  prefetch();
 }
 
 boot().catch((err) => log(err.message, "err"));
