@@ -1,27 +1,77 @@
 # frameshop
 
-Pick frames out of an image sequence in the browser, then export a sprite sheet,
-a GIF, or an APNG. Built for curating keyed RGBA frames down to the handful that
-actually animate well.
+Two steps, in the browser:
 
-The browser is only the UI. Every pixel is read, cropped, resized and written by
-Pillow on the Python side, so RGBA survives intact; nothing round-trips through
-a `<canvas>`.
+1. **Key a video** — drop in a green-screen clip, get an RGBA PNG sequence.
+2. **Pick frames** — preview them as animation, keep the ones that work, crop
+   and resize, export a sprite sheet / GIF / APNG.
+
+Step 1 hands its output straight to step 2, so the usual path is drop a clip and
+keep going.
+
+The browser is only the UI. Every pixel is read, keyed, cropped, resized and
+written by Pillow and numpy on the Python side, so RGBA survives intact; nothing
+round-trips through a `<canvas>`.
 
 ## Run
 
 ```bash
-python frameshop.py D:\Download\clip_keyed_png
+python frameshop.py                               # start at step 1
+python frameshop.py D:\Download\clip_keyed_png    # jump straight to step 2
 ```
 
-Opens <http://127.0.0.1:8765>. Requires Pillow; everything else is stdlib.
+Opens <http://127.0.0.1:8765>.
 
 ```
 -p, --port     default 8765
+--work DIR     where keyed sequences land (default: ./frameshop_work)
 --no-open      don't launch a browser
 ```
 
-## Using it
+Needs Pillow and numpy. Step 1 also needs `ffmpeg` and `ffprobe` on PATH — the
+UI says so up front if they are missing, and step 2 works without them.
+
+## Step 1 — keying
+
+Drop a clip (or click to choose, or paste a folder path to skip straight to step
+2 with frames you already have).
+
+| Field | Meaning |
+|---|---|
+| `trim` | drop this many frames off the front — AI clips often open on a bad beat |
+| `lo` | `G-max(R,B)` at/below which a pixel is fully opaque (default 8) |
+| `hi` | `G-max(R,B)` at/above which a pixel is fully transparent (default 45) |
+| `out` | where the `<name>_keyed_png/` folder is written |
+
+Alpha comes from a colour-difference key, and then the background's
+*contribution* is subtracted outright rather than despilled:
+
+```
+observed   I     = a*FG + (1-a)*BG      BG is known
+premult    a*FG  = I - (1-a)*BG         no division, no instability
+```
+
+Despill only cancels the green cast. It leaves the screen's luminance in the
+edge pixels, which reads as a bright fringe the moment you composite over
+anything dark. Subtracting `(1-a)*BG` removes both at once.
+
+When it finishes you get the numbers that say whether it worked:
+
+```
+91 frames, screen 39,152,55, leak 2.65/255, core alpha 1.0
+```
+
+- **leak** — mean luminance left where the plate was unambiguously screen.
+  Near 0 is right. Above ~10 the clip probably wasn't a green screen, and the
+  frames will look fine in the grid and wrong the moment you composite them.
+- **core alpha** — mean alpha where the plate was unambiguously subject. Must
+  be 1.0; below that the key is eating the subject, so lower `lo`.
+
+The screen colour is sampled once, from the four corners of the first frame, so
+the plate has to be static and reasonably even. Synthetic and AI-generated
+plates are. A hand-held shot with a drifting gradient is not.
+
+## Step 2 — picking
 
 **Picking.** Every frame starts picked. In the grid on the right:
 
@@ -91,8 +141,10 @@ Frames go out in sequence order, not the order you clicked them.
 ```
 frameshop.py            CLI entry
 frameshop/
+  key.py                step 1: ffmpeg decode + colour-difference key
+  jobs.py               one background job, with a pollable status
   library.py            scan a directory, cache scaled renditions
-  transform.py          global crop + resize
+  transform.py          global crop + resize, subject bbox
   export.py             sheet / gif / apng writers
   server.py             stdlib http.server, routes, token guard
   static/               index.html, app.css, app.js

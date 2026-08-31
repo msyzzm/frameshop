@@ -12,23 +12,31 @@ import mimetypes
 import os
 import posixpath
 import secrets
+import tempfile
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import export as exporters
+from . import key
 from . import transform
-from .library import PREVIEW_MAX, THUMB_MAX
+from .jobs import Runner
+from .library import PREVIEW_MAX, THUMB_MAX, Library
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 TOKEN_HEADER = "X-Frameshop-Token"
 TEXT = "text/plain; charset=utf-8"
 
 
+UPLOAD_CHUNK = 1 << 20
+
+
 class Handler(BaseHTTPRequestHandler):
-    library = None
+    library = None          # rebound whenever step 1 finishes or a dir is opened
+    workroot = ""
     token = ""
+    jobs = Runner()
     server_version = "frameshop"
 
     def log_message(self, fmt, *args):
@@ -69,7 +77,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self._authorised():
                 return
             if route == "/api/frames":
-                return self._frames()
+                return self._json(200, self._frames_payload())
+            if route == "/api/job":
+                return self._json(200, self.jobs.status)
             if route in ("/api/thumb", "/api/preview"):
                 longest = THUMB_MAX if route == "/api/thumb" else PREVIEW_MAX
                 return self._rendition(query, longest)
@@ -92,18 +102,23 @@ class Handler(BaseHTTPRequestHandler):
         with open(path, "rb") as handle:
             self._send(200, handle.read(), ctype)
 
-    def _frames(self):
+    def _frames_payload(self):
         lib = self.library
+        if lib is None:                     # nothing opened yet: the UI shows step 1
+            return {"directory": None, "uniform": True, "frames": [],
+                    "workroot": self.workroot, "ffmpeg": key.have_ffmpeg()}
         sizes = {(f.width, f.height) for f in lib.frames}
-        self._json(200, {
+        return {
             "directory": lib.directory,
             "uniform": len(sizes) == 1,
+            "workroot": self.workroot,
+            "ffmpeg": key.have_ffmpeg(),
             "frames": [{"name": f.name, "w": f.width, "h": f.height} for f in lib.frames],
-        })
+        }
 
     def _rendition(self, query, longest):
         name = (query.get("name") or [""])[0]
-        if not self.library.get(name):
+        if not self.library or not self.library.get(name):
             return self._send(404, b"unknown frame", TEXT)
         self._send(200, self.library.rendition(name, longest), "image/png")
 
@@ -111,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
         """The untouched source file — the preview rendition is too small to
         zoom into, which is the whole point of zooming."""
         name = (query.get("name") or [""])[0]
-        frame = self.library.get(name)
+        frame = self.library.get(name) if self.library else None
         if not frame:
             return self._send(404, b"unknown frame", TEXT)
         ctype = mimetypes.guess_type(frame.path)[0] or "application/octet-stream"
@@ -122,11 +137,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = urlparse(self.path).path
-        handlers = {"/api/export": self._export, "/api/autocrop": self._autocrop}
-        if route not in handlers:
+        handlers = {"/api/export": self._export, "/api/autocrop": self._autocrop,
+                    "/api/open": self._open}
+        if route != "/api/import" and route not in handlers:
             return self._send(404, b"not found", TEXT)
         if not self._authorised():
             return
+        if route == "/api/import":
+            return self._import()           # binary body, not JSON
 
         length = int(self.headers.get("Content-Length") or 0)
         try:
@@ -142,10 +160,74 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
     def _picked(self, request):
+        if not self.library:
+            raise ValueError("no frames are open")
         names = [n for n in request.get("names") or [] if self.library.get(n)]
         if not names:
             raise ValueError("nothing selected")
         return names
+
+    def _open(self, request):
+        directory = (request.get("directory") or "").strip()
+        if not directory:
+            raise ValueError("no directory given")
+        Handler.library = Library(directory)
+        return self._frames_payload()
+
+    def _spool_upload(self, suffix):
+        """Stream the request body to a temp file. Videos are too big to hold."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            raise ValueError("empty upload")
+
+        fd, path = tempfile.mkstemp(prefix="frameshop_upload_", suffix=suffix)
+        with os.fdopen(fd, "wb") as handle:
+            left = length
+            while left > 0:
+                chunk = self.rfile.read(min(UPLOAD_CHUNK, left))
+                if not chunk:
+                    break
+                handle.write(chunk)
+                left -= len(chunk)
+        return path
+
+    def _import(self):
+        """Step 1: raw video bytes in the body, keyed PNG sequence out.
+
+        Raw rather than multipart - there is exactly one file and no form
+        fields, so multipart would only add a parser to get wrong.
+        """
+        query = parse_qs(urlparse(self.path).query)
+        arg = lambda name, default="": (query.get(name) or [default])[0]  # noqa: E731
+
+        filename = os.path.basename(arg("name", "clip.mp4"))
+        stem = os.path.splitext(filename)[0] or "clip"
+        outdir = os.path.join(arg("outdir") or self.workroot, f"{stem}_keyed_png")
+
+        try:
+            video = self._spool_upload(os.path.splitext(filename)[1] or ".mp4")
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)})
+
+        def work(progress):
+            try:
+                result = key.key_video(
+                    video, outdir,
+                    trim=int(arg("trim", "0")),
+                    lo=float(arg("lo", key.DEFAULT_LO)),
+                    hi=float(arg("hi", key.DEFAULT_HI)),
+                    progress=progress)
+            finally:
+                os.unlink(video)            # the upload was only ever a scratch copy
+            Handler.library = Library(result["directory"])
+            return result
+
+        try:
+            self.jobs.start(work, label=filename)
+        except ValueError as exc:
+            os.unlink(video)
+            return self._json(409, {"error": str(exc)})
+        return self._json(202, {"started": True, "outdir": outdir})
 
     def _autocrop(self, request):
         names = self._picked(request)
@@ -201,14 +283,20 @@ class Handler(BaseHTTPRequestHandler):
         }
 
 
-def serve(library, port=8765, open_browser=True):
+def serve(library=None, workroot="", port=8765, open_browser=True):
     Handler.library = library
+    Handler.workroot = os.path.abspath(workroot or "frameshop_work")
     Handler.token = secrets.token_urlsafe(16)
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
 
-    print(f"{len(library.frames)} frames from {library.directory}")
+    if library:
+        print(f"{len(library.frames)} frames from {library.directory}")
+    else:
+        print(f"no frames open - start at step 1. keyed output goes to {Handler.workroot}")
+    if not key.have_ffmpeg():
+        print("ffmpeg/ffprobe not on PATH - step 1 (video import) will not work")
     print(f"open {url}   (ctrl-c to stop)")
     if open_browser:
         threading.Timer(0.4, webbrowser.open, args=[url]).start()

@@ -9,10 +9,53 @@
 
 <header>
   <strong>frameshop</strong>
+  <button id="tab1" class="step">1 · key video</button>
+  <button id="tab2" class="step">2 · pick frames</button>
   <span id="dir" class="muted mono"></span>
   <span class="spacer"></span>
   <span id="count" class="pill"></span>
 </header>
+
+<section id="step1">
+  <div class="card">
+    <h2>Key a green screen out of a video</h2>
+    <p class="muted small">
+      Drop a clip below. Every frame is keyed to RGBA and written as a PNG
+      sequence, which step 2 then opens automatically.
+    </p>
+
+    <div id="drop">
+      <strong>Drop a video here</strong>
+      <span class="muted small">or click to choose &middot; mp4, mov, webm, mkv</span>
+      <input id="file" type="file" accept="video/*" hidden>
+    </div>
+
+    <div class="bar wrap">
+      <label>trim <input id="trim" type="number" class="num" value="0" min="0"
+                         title="drop this many frames off the front"></label>
+      <label>lo <input id="lo" type="number" class="num" value="8" step="1"
+                       title="G-max(R,B) at/below which a pixel is fully opaque"></label>
+      <label>hi <input id="hi" type="number" class="num" value="45" step="1"
+                       title="G-max(R,B) at/above which a pixel is fully transparent"></label>
+      <span class="spacer"></span>
+      <label>out <input id="workroot" type="text" class="wide"></label>
+    </div>
+
+    <div class="bar wrap">
+      <button id="keyGo" class="primary">Key it</button>
+      <progress id="keyProgress" value="0" max="1" hidden></progress>
+      <span id="keyStatus" class="muted small"></span>
+    </div>
+
+    <hr>
+
+    <div class="bar wrap">
+      <label>or open a folder of frames
+        <input id="openDir" type="text" class="wide" placeholder="D:\frames_keyed_png"></label>
+      <button id="openGo">Open</button>
+    </div>
+  </div>
+</section>
 
 <main>
   <section id="stage">

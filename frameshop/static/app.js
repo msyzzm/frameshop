@@ -551,10 +551,114 @@ function bindControls() {
   };
 }
 
-async function boot() {
-  const data = await api("/api/frames");
+// -- step 1: video -> keyed PNG sequence -------------------------------------
+
+function showStep(n) {
+  document.body.classList.toggle("step1", n === 1);
+  $("tab1").classList.toggle("on", n === 1);
+  $("tab2").classList.toggle("on", n === 2);
+  $("tab2").disabled = !state.frames.length;
+  if (n === 2) draw();
+}
+
+const setKeyStatus = (text, cls = "") => {
+  const el = $("keyStatus");
+  el.textContent = text;
+  el.className = `small ${cls || "muted"}`;
+};
+
+async function pollJob() {
+  const bar = $("keyProgress");
+  for (;;) {
+    const job = await api("/api/job");
+
+    if (job.state === "running") {
+      bar.hidden = false;
+      bar.max = job.total || 1;
+      bar.value = job.done || 0;
+      setKeyStatus(job.total ? `keying ${job.done}/${job.total}` : "decoding video…");
+      await new Promise((r) => setTimeout(r, 300));
+      continue;
+    }
+
+    bar.hidden = true;
+    if (job.state === "error") return setKeyStatus(job.error, "err");
+    if (job.state !== "done") return setKeyStatus("");
+
+    setKeyStatus(`${job.frames} frames, screen ${job.screen.join(",")}, `
+      + `leak ${job.leak}/255, core alpha ${job.core}`, "ok");
+    // A high leak means the plate was not really a green screen; say so, since
+    // the frames will look fine in the grid and wrong the moment you composite.
+    if (job.leak > 10) log(`leak ${job.leak}/255 is high - was that really a green screen?`, "err");
+    return openLibrary({ directory: job.directory });
+  }
+}
+
+async function uploadVideo(file) {
+  const params = new URLSearchParams({
+    name: file.name,
+    trim: $("trim").value || 0,
+    lo: $("lo").value || 8,
+    hi: $("hi").value || 45,
+    outdir: $("workroot").value || "",
+  });
+
+  setKeyStatus(`uploading ${(file.size / 1048576).toFixed(1)} MB…`);
+  try {
+    await api(`/api/import?${params}`, { method: "POST", body: file });
+    await pollJob();
+  } catch (err) {
+    setKeyStatus(err.message, "err");
+  }
+}
+
+function bindStep1() {
+  const drop = $("drop");
+  const file = $("file");
+
+  drop.onclick = () => file.click();
+  file.onchange = () => file.files[0] && uploadVideo(file.files[0]);
+
+  drop.ondragover = (ev) => { ev.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (ev) => {
+    ev.preventDefault();
+    drop.classList.remove("over");
+    const dropped = ev.dataTransfer.files[0];
+    if (dropped) uploadVideo(dropped);
+  };
+
+  $("keyGo").onclick = () => (file.files[0] ? uploadVideo(file.files[0]) : file.click());
+  $("openGo").onclick = async () => {
+    try {
+      await openLibrary(await api("/api/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ directory: $("openDir").value }),
+      }));
+    } catch (err) {
+      setKeyStatus(err.message, "err");
+    }
+  };
+
+  $("tab1").onclick = () => showStep(1);
+  $("tab2").onclick = () => showStep(2);
+}
+
+// -- step 2 -------------------------------------------------------------------
+
+async function openLibrary(data) {
+  if (!data.frames) data = await api("/api/frames");
+  if (!data.frames.length) return;
+
   state.frames = data.frames;
-  state.frames.forEach((f) => state.picked.add(f.name));
+  state.picked = new Set(data.frames.map((f) => f.name));
+  state.images.clear();
+  state.full.clear();
+  state.lastImg = null;
+  state.cursor = 0;
+  state.crop = null;
+  state.zoom = 0;
 
   $("dir").textContent = data.directory;
   $("stem").value = data.directory.split(/[\\/]/).filter(Boolean).pop() || "frames";
@@ -565,12 +669,22 @@ async function boot() {
   buildGrid();
   syncPicks();
   syncCropInputs();
+  showStep(2);
+  prefetch();
+}
+
+async function boot() {
   bindCropDrag();
   bindAspect();
   bindControls();
-  draw();
+  bindStep1();
 
-  prefetch();
+  const data = await api("/api/frames");
+  $("workroot").value = data.workroot || "";
+  if (!data.ffmpeg) setKeyStatus("ffmpeg/ffprobe not on PATH - step 1 is unavailable", "err");
+
+  if (data.frames.length) await openLibrary(data);
+  else showStep(1);
 }
 
 boot().catch((err) => log(err.message, "err"));

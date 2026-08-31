@@ -25,12 +25,14 @@ class Frame:
 class Library:
     def __init__(self, directory: str):
         self.directory = os.path.abspath(directory)
+        # ValueError, not SystemExit: the server opens libraries on request, and
+        # a bad path there is a 400, not a reason to take the process down.
         if not os.path.isdir(self.directory):
-            raise SystemExit(f"not a directory: {self.directory}")
+            raise ValueError(f"not a directory: {self.directory}")
 
         self.frames = self._scan()
         if not self.frames:
-            raise SystemExit(f"no images in {self.directory}")
+            raise ValueError(f"no images in {self.directory}")
 
         self._by_name = {f.name: f for f in self.frames}
         self._cache: dict[tuple[str, int], bytes] = {}
