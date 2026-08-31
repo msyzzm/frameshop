@@ -7,6 +7,7 @@ port and make the tool write files.
 
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 import os
@@ -30,11 +31,18 @@ TEXT = "text/plain; charset=utf-8"
 
 
 UPLOAD_CHUNK = 1 << 20
+MAX_UPLOAD = 4 << 30        # 4 GiB; an unbounded upload endpoint fills the disk
+
+
+def _loopback(host):
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 class Handler(BaseHTTPRequestHandler):
     library = None          # rebound whenever step 1 finishes or a dir is opened
     workroot = ""
+    root = ""               # every path the client names must sit under this
+    password = ""           # Basic auth; empty means the port is trusted
     token = ""
     jobs = Runner()
     server_version = "frameshop"
@@ -57,14 +65,59 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode("utf-8"), "application/json")
 
     def _authorised(self):
+        """CSRF guard. Not authentication — the page hands this out freely."""
         if self.headers.get(TOKEN_HEADER) == self.token:
             return True
         self._json(403, {"error": "bad or missing token"})
         return False
 
+    def _authenticated(self):
+        """Basic auth, when a password is configured. This IS the front door.
+
+        Plaintext over HTTP, so it is only meaningful behind TLS, a reverse
+        proxy, or a private network. It stops a stranger driving the tool; it
+        does not stop anyone reading the wire.
+        """
+        if not self.password:
+            return True
+
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Basic "):
+            try:
+                supplied = base64.b64decode(header[6:]).decode().partition(":")[2]
+            except (ValueError, UnicodeDecodeError):
+                supplied = ""
+            if secrets.compare_digest(supplied, self.password):
+                return True
+
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="frameshop"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return False
+
+    def _within_root(self, path):
+        """Resolve a client-supplied path, refusing anything outside the root.
+
+        Without this, `outdir` and `directory` are arbitrary file write and
+        read on whatever account the server runs as.
+        """
+        full = os.path.abspath(path)
+        if not self.root:
+            return full                 # no jail: the localhost default
+        try:
+            allowed = os.path.commonpath([full, self.root]) == self.root
+        except ValueError:              # different drives on Windows
+            allowed = False
+        if not allowed:
+            raise ValueError(f"path must be inside {self.root}")
+        return full
+
     # -- GET --------------------------------------------------------------
 
     def do_GET(self):
+        if not self._authenticated():
+            return
         url = urlparse(self.path)
         route, query = url.path, parse_qs(url.query)
 
@@ -136,6 +189,8 @@ class Handler(BaseHTTPRequestHandler):
     # -- POST -------------------------------------------------------------
 
     def do_POST(self):
+        if not self._authenticated():
+            return
         route = urlparse(self.path).path
         handlers = {"/api/export": self._export, "/api/autocrop": self._autocrop,
                     "/api/open": self._open}
@@ -171,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
         directory = (request.get("directory") or "").strip()
         if not directory:
             raise ValueError("no directory given")
-        Handler.library = Library(directory)
+        Handler.library = Library(self._within_root(directory))
         return self._frames_payload()
 
     def _spool_upload(self, suffix):
@@ -179,6 +234,8 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             raise ValueError("empty upload")
+        if length > MAX_UPLOAD:
+            raise ValueError(f"upload is larger than the {MAX_UPLOAD >> 30} GiB limit")
 
         fd, path = tempfile.mkstemp(prefix="frameshop_upload_", suffix=suffix)
         with os.fdopen(fd, "wb") as handle:
@@ -202,9 +259,10 @@ class Handler(BaseHTTPRequestHandler):
 
         filename = os.path.basename(arg("name", "clip.mp4"))
         stem = os.path.splitext(filename)[0] or "clip"
-        outdir = os.path.join(arg("outdir") or self.workroot, f"{stem}_keyed_png")
 
         try:
+            outdir = self._within_root(
+                os.path.join(arg("outdir") or self.workroot, f"{stem}_keyed_png"))
             video = self._spool_upload(os.path.splitext(filename)[1] or ".mp4")
         except ValueError as exc:
             return self._json(400, {"error": str(exc)})
@@ -245,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
         outdir = (request.get("outdir") or "").strip()
         if not outdir:
             raise ValueError("no output directory")
+        outdir = self._within_root(outdir)
 
         formats = request.get("formats") or []
         if not formats:
@@ -283,21 +342,35 @@ class Handler(BaseHTTPRequestHandler):
         }
 
 
-def serve(library=None, workroot="", port=8765, open_browser=True):
+def serve(library=None, workroot="", root="", host="127.0.0.1", port=8765,
+          password="", open_browser=True):
+    # Fail closed. Exposing this without auth hands anyone who can reach the
+    # port arbitrary file read and write as whatever user we run as.
+    if not _loopback(host) and not password:
+        raise SystemExit(
+            f"refusing to bind {host} without a password - set FRAMESHOP_TOKEN")
+
     Handler.library = library
     Handler.workroot = os.path.abspath(workroot or "frameshop_work")
+    Handler.root = os.path.abspath(root) if root else ""
+    Handler.password = password
     Handler.token = secrets.token_urlsafe(16)
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    url = f"http://127.0.0.1:{port}/"
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    shown = "127.0.0.1" if host == "0.0.0.0" else host
+    url = f"http://{shown}:{port}/"
 
     if library:
         print(f"{len(library.frames)} frames from {library.directory}")
     else:
         print(f"no frames open - start at step 1. keyed output goes to {Handler.workroot}")
+    if Handler.root:
+        print(f"paths confined to {Handler.root}")
+    if password:
+        print("basic auth on (user: anything, password: $FRAMESHOP_TOKEN)")
     if not key.have_ffmpeg():
         print("ffmpeg/ffprobe not on PATH - step 1 (video import) will not work")
-    print(f"open {url}   (ctrl-c to stop)")
+    print(f"listening on {host}:{port} - open {url}   (ctrl-c to stop)")
     if open_browser:
         threading.Timer(0.4, webbrowser.open, args=[url]).start()
 

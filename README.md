@@ -150,6 +150,55 @@ frameshop/
   static/               index.html, app.css, app.js
 ```
 
+## Docker
+
+```bash
+export FRAMESHOP_TOKEN=$(openssl rand -hex 24)
+docker compose up -d --build
+```
+
+Then <http://127.0.0.1:8765> — any username, that token as the password. Work
+lands in `./data` on the host.
+
+The compose file publishes on the host's **loopback** only. To reach it from
+another machine, tunnel (`ssh -L 8765:localhost:8765 server`) or put a
+TLS-terminating reverse proxy in front. Widening the mapping to `8765:8765`
+puts a plaintext password on the wire.
+
+Running it by hand instead:
+
+```bash
+docker build -t frameshop .
+docker run -d --name frameshop \
+  -p 127.0.0.1:8765:8765 \
+  -e FRAMESHOP_TOKEN="$FRAMESHOP_TOKEN" \
+  -v "$PWD/data:/data" \
+  frameshop
+```
+
+## Exposing it beyond localhost
+
+The default — loopback, no password, no path jail — assumes one person on one
+machine. That assumption is what makes `outdir` and `directory` safe to accept
+as free-form paths. Off localhost it stops holding, so three things change:
+
+| Flag / env | Effect |
+|---|---|
+| `--host` | bind address. Anything but loopback **refuses to start** without a password |
+| `FRAMESHOP_TOKEN` | turns on HTTP Basic auth for every request, `/` included |
+| `--root DIR` | every path the client names — `outdir`, `directory`, the import target — must resolve inside `DIR` |
+
+Without `--root`, `POST /api/export` is an arbitrary file write and
+`POST /api/open` an arbitrary directory read, as whatever user the server runs
+as. The Docker image sets `--root /data` and runs as a non-root user for
+exactly that reason.
+
+Uploads are capped at 4 GiB.
+
+Basic auth over plain HTTP is a lock, not a tunnel. It stops a stranger driving
+the tool; it does nothing about anyone reading the wire. Terminate TLS in front
+of it, or keep it on a private network.
+
 ## A note on the token
 
 The server binds `127.0.0.1` only, and every `/api/*` request must carry a
