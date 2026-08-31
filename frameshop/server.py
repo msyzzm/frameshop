@@ -108,7 +108,9 @@ class Handler(BaseHTTPRequestHandler):
     # -- POST -------------------------------------------------------------
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/export":
+        route = urlparse(self.path).path
+        handlers = {"/api/export": self._export, "/api/autocrop": self._autocrop}
+        if route not in handlers:
             return self._send(404, b"not found", TEXT)
         if not self._authorised():
             return
@@ -120,16 +122,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "malformed JSON"})
 
         try:
-            self._json(200, self._export(request))
+            self._json(200, handlers[route](request))
         except ValueError as exc:
             self._json(400, {"error": str(exc)})
         except OSError as exc:
             self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
 
-    def _export(self, request):
+    def _picked(self, request):
         names = [n for n in request.get("names") or [] if self.library.get(n)]
         if not names:
             raise ValueError("nothing selected")
+        return names
+
+    def _autocrop(self, request):
+        names = self._picked(request)
+        box = transform.subject_bbox(
+            (self.library.open_rgba(n) for n in names),
+            threshold=int(request.get("threshold") or 8),
+            padding=int(request.get("padding") or 0))
+        if box is None:
+            raise ValueError("every picked frame is fully transparent")
+        return {**box, "frames": len(names)}
+
+    def _export(self, request):
+        names = self._picked(request)
 
         outdir = (request.get("outdir") or "").strip()
         if not outdir:

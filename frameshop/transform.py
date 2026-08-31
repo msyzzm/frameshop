@@ -22,6 +22,39 @@ def clamp_crop(crop, width, height):
     return x, y, w, h
 
 
+def subject_bbox(images, threshold=8, padding=0):
+    """Union of the opaque region over every frame -> {x, y, w, h}, or None.
+
+    Union, not per-frame: one crop has to hold the subject through the whole
+    animation, so a box that fits frame 1 but clips frame 40 is worthless.
+
+    The threshold matters - a keyed matte trails pixels at alpha 1-5 well past
+    anything you would call the subject, and getbbox() on the raw alpha would
+    happily include them.
+    """
+    box = None
+    width = height = 0
+
+    for im in images:
+        width, height = max(width, im.width), max(height, im.height)
+        mask = im.getchannel("A").point(lambda a: 255 if a > threshold else 0)
+        found = mask.getbbox()
+        if found is None:
+            continue        # fully transparent frame contributes nothing
+        box = found if box is None else (
+            min(box[0], found[0]), min(box[1], found[1]),
+            max(box[2], found[2]), max(box[3], found[3]))
+
+    if box is None:
+        return None
+
+    left = max(0, box[0] - padding)
+    top = max(0, box[1] - padding)
+    right = min(width, box[2] + padding)
+    bottom = min(height, box[3] + padding)
+    return {"x": left, "y": top, "w": right - left, "h": bottom - top}
+
+
 def apply(im, crop=None, resize=None):
     box = clamp_crop(crop, im.width, im.height)
     if box:

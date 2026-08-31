@@ -40,9 +40,18 @@ Opens <http://127.0.0.1:8765>. Requires Pillow; everything else is stdlib.
 you commit to it. Set the background to black, white or magenta to judge a matte
 edge — magenta is the one that exposes residual green.
 
-**Cropping.** Tick `crop`, drag a rect on the preview. Fine-tune with the four
-numbers in the footer. The crop is global, never per-frame: a sprite sheet needs
-one frame size, and a varying crop would make the animation jitter.
+**Cropping.** Tick `crop`, then drag a rect on the preview. Drag an edge or a
+corner handle to adjust it, or drag the middle to move the whole box; the four
+numbers in the footer (`x` `y` `w` `h`, in source pixels) take typed values too.
+
+`auto` fits the box for you: it reads the alpha of every *picked* frame and
+returns the union of their opaque regions, so the box holds the subject for the
+whole animation rather than just the frame you happen to be looking at. Pixels
+at alpha 8 or below are ignored — a keyed matte trails stray near-transparent
+pixels well past anything you would call the subject.
+
+The crop is global, never per-frame: a sprite sheet needs one frame size, and a
+varying crop would make the animation jitter.
 
 **Resizing.** The size fields default to the crop (or the source). `lock ratio`
 keeps them proportional. `reset` snaps back.

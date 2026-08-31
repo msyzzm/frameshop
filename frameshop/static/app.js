@@ -195,6 +195,16 @@ function drawCropOverlay(ctx, canvas, frame) {
   ctx.strokeStyle = "#4a9eff";
   ctx.lineWidth = 1;
   ctx.strokeRect(x * k + 0.5, y * k + 0.5, w * k, h * k);
+
+  // Handles, so it reads as draggable rather than as a drawn-once rectangle.
+  const size = 7;
+  ctx.fillStyle = "#4a9eff";
+  for (const px of [x, x + w / 2, x + w]) {
+    for (const py of [y, y + h / 2, y + h]) {
+      if (px === x + w / 2 && py === y + h / 2) continue;
+      ctx.fillRect(px * k - size / 2, py * k - size / 2, size, size);
+    }
+  }
 }
 
 function draw() {
@@ -239,9 +249,47 @@ function setPlaying(on) {
 
 // -- crop --------------------------------------------------------------------
 
+const HANDLE_PX = 9;                    // grab tolerance, in on-screen pixels
+const CURSORS = {
+  n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize",
+  nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize",
+  move: "move",
+};
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+
+/** Which part of the crop rect is under `pt`: an edge/corner, "move", or null. */
+function cropHitZone(pt, tol) {
+  const c = state.crop;
+  if (!c) return null;
+  const [l, t, r, b] = [c.x, c.y, c.x + c.w, c.y + c.h];
+  if (pt.x < l - tol || pt.x > r + tol || pt.y < t - tol || pt.y > b + tol) return null;
+
+  const zone = (Math.abs(pt.y - t) <= tol ? "n" : Math.abs(pt.y - b) <= tol ? "s" : "")
+             + (Math.abs(pt.x - l) <= tol ? "w" : Math.abs(pt.x - r) <= tol ? "e" : "");
+  if (zone) return zone;
+  return (pt.x > l && pt.x < r && pt.y > t && pt.y < b) ? "move" : null;
+}
+
+function applyCropDrag(zone, from, start, pt, frame) {
+  if (zone === "move") {
+    return {
+      x: clamp(start.x + pt.x - from.x, 0, frame.w - start.w),
+      y: clamp(start.y + pt.y - from.y, 0, frame.h - start.h),
+      w: start.w, h: start.h,
+    };
+  }
+  let [l, t, r, b] = [start.x, start.y, start.x + start.w, start.y + start.h];
+  if (zone.includes("w")) l = clamp(pt.x, 0, r - 1);
+  if (zone.includes("e")) r = clamp(pt.x, l + 1, frame.w);
+  if (zone.includes("n")) t = clamp(pt.y, 0, b - 1);
+  if (zone.includes("s")) b = clamp(pt.y, t + 1, frame.h);
+  return { x: l, y: t, w: r - l, h: b - t };
+}
+
 function bindCropDrag() {
   const canvas = $("view");
-  let origin = null;
+  let drag = null;    // {zone, from, start} while a pointer is down
 
   const toSource = (ev) => {
     const rect = canvas.getBoundingClientRect();
@@ -249,28 +297,68 @@ function bindCropDrag() {
     return {
       x: Math.round((ev.clientX - rect.left) / rect.width * frame.w),
       y: Math.round((ev.clientY - rect.top) / rect.height * frame.h),
+      // Tolerance has to be in source px, and the canvas is drawn scaled.
+      tol: HANDLE_PX * frame.w / rect.width,
     };
   };
 
   canvas.onpointerdown = (ev) => {
     if (!$("cropOn").checked) return;
-    origin = toSource(ev);
+    const pt = toSource(ev);
+    drag = { zone: cropHitZone(pt, pt.tol) || "new", from: pt, start: state.crop };
+    if (drag.zone === "new") state.crop = { x: pt.x, y: pt.y, w: 0, h: 0 };
     canvas.setPointerCapture(ev.pointerId);
   };
+
   canvas.onpointermove = (ev) => {
-    if (!origin) return;
-    const now = toSource(ev);
-    state.crop = {
-      x: Math.min(origin.x, now.x), y: Math.min(origin.y, now.y),
-      w: Math.abs(now.x - origin.x), h: Math.abs(now.y - origin.y),
-    };
+    const pt = toSource(ev);
+    if (!drag) {
+      if ($("cropOn").checked) {
+        canvas.style.cursor = CURSORS[cropHitZone(pt, pt.tol)] || "crosshair";
+      }
+      return;
+    }
+    state.crop = drag.zone === "new"
+      ? {
+          x: Math.min(drag.from.x, pt.x), y: Math.min(drag.from.y, pt.y),
+          w: Math.abs(pt.x - drag.from.x), h: Math.abs(pt.y - drag.from.y),
+        }
+      : applyCropDrag(drag.zone, drag.from, drag.start, pt, state.frames[state.cursor]);
     syncCropInputs();
     draw();
   };
+
   canvas.onpointerup = () => {
-    origin = null;
-    if (state.crop && (state.crop.w < 4 || state.crop.h < 4)) resetCrop();
+    // Only a fresh drag can be a stray click. Nudging an edge inward is
+    // deliberate, and applyCropDrag already floors it at 1px.
+    const stray = drag?.zone === "new" && state.crop
+      && (state.crop.w < 4 || state.crop.h < 4);
+    drag = null;
+    if (stray) resetCrop();
   };
+}
+
+async function autoCrop() {
+  const names = pickedNames();
+  if (!names.length) return log("nothing picked", "err");
+
+  $("cropAuto").disabled = true;
+  try {
+    const box = await api("/api/autocrop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names, padding: 2 }),
+    });
+    state.crop = { x: box.x, y: box.y, w: box.w, h: box.h };
+    $("cropOn").checked = true;
+    syncCropInputs();
+    draw();
+    log(`auto crop ${box.w}x${box.h} at ${box.x},${box.y} over ${box.frames} frames`, "ok");
+  } catch (err) {
+    log(err.message, "err");
+  } finally {
+    $("cropAuto").disabled = false;
+  }
 }
 
 function syncCropInputs() {
@@ -357,6 +445,7 @@ function bindControls() {
   $("fps").onchange = () => { if (state.playing) setPlaying(true); };
   $("bg").onchange = draw;
   $("cropOn").onchange = draw;
+  $("cropAuto").onclick = autoCrop;
   $("cropReset").onclick = resetCrop;
   $("sizeReset").onclick = syncSizeFromCrop;
   ["cx", "cy", "cw", "ch"].forEach((id) => { $(id).onchange = readCropInputs; });
