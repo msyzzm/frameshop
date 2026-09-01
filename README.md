@@ -163,8 +163,34 @@ export FRAMESHOP_TOKEN=$(openssl rand -hex 24)
 docker compose up -d --build
 ```
 
-Then <http://127.0.0.1:8765> — any username, that token as the password. Work
-lands in `./data` on the host.
+Then <http://127.0.0.1:8765> — any username, that token as the password.
+
+Work lands in a named volume, `frameshop-data`. Pull results out with the
+download links in the log, or `docker compose cp frameshop:/data/... .`
+
+### Using a host directory instead
+
+A bind mount carries the host directory's ownership into the container and
+overrides the image's `chown`, so the container — which runs as uid 10001 —
+gets `Permission denied: '/data/work'`. Swap the volume for `./data:/data` and
+then either hand that directory to the uid:
+
+```bash
+sudo chown -R 10001:10001 ./data
+```
+
+or run the container as yourself, by adding to the service:
+
+```yaml
+    user: "${UID:-1000}:${GID:-1000}"
+```
+
+```bash
+UID=$(id -u) GID=$(id -g) docker compose up -d
+```
+
+The server checks the work directory is writable at startup and refuses to come
+up otherwise, rather than failing partway through your first import.
 
 The compose file publishes on the host's **loopback** only. To reach it from
 another machine, tunnel (`ssh -L 8765:localhost:8765 server`) or put a

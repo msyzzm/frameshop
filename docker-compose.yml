@@ -10,5 +10,20 @@ services:
       # No default. Compose fails loudly rather than starting it unprotected.
       FRAMESHOP_TOKEN: ${FRAMESHOP_TOKEN:?set FRAMESHOP_TOKEN before starting}
     volumes:
-      - ./data:/data
+      # A named volume, because a bind mount brings the host directory's own
+      # ownership with it and overrides the image's chown - the container runs
+      # as uid 10001 and gets EACCES on /data. Docker seeds a named volume from
+      # the image, ownership included, so this works with no setup.
+      #
+      # For a host directory instead, swap in the bind mount below and hand it
+      # to that uid first:
+      #     sudo chown -R 10001:10001 ./data
+      # or run the container as yourself:
+      #     user: "${UID:-1000}:${GID:-1000}"
+      #
+      # - ./data:/data
+      - frameshop-data:/data
     restart: unless-stopped
+
+volumes:
+  frameshop-data:

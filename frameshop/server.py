@@ -389,6 +389,27 @@ class Handler(BaseHTTPRequestHandler):
         }
 
 
+def _check_writable(directory):
+    """Fail at startup rather than halfway through someone's first import.
+
+    A bind-mounted volume carries the host directory's ownership and overrides
+    whatever the image chowned, which is the usual reason this is unwritable.
+    """
+    probe = os.path.join(directory, ".frameshop-write-test")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with open(probe, "w"):
+            pass
+        os.remove(probe)
+    except OSError as exc:
+        uid = getattr(os, "getuid", lambda: "?")()
+        raise SystemExit(
+            f"cannot write to {directory}: {exc}\n"
+            f"this process runs as uid {uid}. In Docker a bind-mounted volume "
+            f"keeps the host directory's owner, so either chown it to that uid "
+            f"or use a named volume.")
+
+
 def serve(library=None, workroot="", root="", host="127.0.0.1", port=8765,
           password="", open_browser=True):
     # Fail closed. Exposing this without auth hands anyone who can reach the
@@ -399,6 +420,7 @@ def serve(library=None, workroot="", root="", host="127.0.0.1", port=8765,
 
     Handler.library = library
     Handler.workroot = os.path.abspath(workroot or "frameshop_work")
+    _check_writable(Handler.workroot)
     Handler.root = os.path.abspath(root) if root else ""
     Handler.password = password
     Handler.token = secrets.token_urlsafe(16)
