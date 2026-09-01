@@ -41,6 +41,14 @@ can scrub it and mark the part you actually want; `Key it` then uploads and
 keys that span only. `set in` / `set out` take the current playhead, and the
 two boxes accept typed seconds.
 
+The browser's own controls read to the second and scrub at a few hundred
+milliseconds per pixel, so neither can place a mark. Under the video is the
+playhead to the millisecond, and `◀` `▶` walk it one frame at a time — which
+also means you can see the frame an in-point will actually land on. No browser
+exposes a clip's frame rate, so it is measured from the frames as they play:
+until you have played a moment of it, the arrows nudge by 10 ms instead, and
+the frame rate appears beside the playhead once it is known.
+
 If the browser can't decode the container — some things ffmpeg handles happily,
 no browser will — the preview hides itself and the whole clip is keyed.
 

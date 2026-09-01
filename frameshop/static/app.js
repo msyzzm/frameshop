@@ -14,6 +14,7 @@ const state = {
   playing: false,
   clip: null,          // step 1: the File, held back until you press Key it
   clipUrl: "",         // its object URL, for local preview
+  frameDur: 0,         // the clip's seconds-per-frame, once measured
 };
 
 const MIN_ZOOM = 0.05;
@@ -643,6 +644,7 @@ function pickFile(file) {
 
   state.clip = file;
   state.clipUrl = URL.createObjectURL(file);
+  state.frameDur = 0;          // a new clip, with its own frame rate
 
   const video = $("vid");
   video.src = state.clipUrl;
@@ -651,8 +653,9 @@ function pickFile(file) {
 
   video.onloadedmetadata = () => {
     $("tStart").value = 0;
-    $("tEnd").value = video.duration.toFixed(2);
+    $("tEnd").value = video.duration.toFixed(3);
     syncRange();
+    showPlayhead();
   };
   // Some containers ffmpeg handles happily are ones no browser will decode.
   video.onerror = () => {
@@ -668,8 +671,80 @@ function syncRange() {
   const whole = $("vid").duration || 0;
   const span = Math.max(0, end - start);
   $("clipInfo").textContent = span
-    ? `${span.toFixed(2)}s of ${whole.toFixed(2)}s`
-    : `${whole.toFixed(2)}s`;
+    ? `${span.toFixed(3)}s of ${whole.toFixed(3)}s`
+    : `${whole.toFixed(3)}s`;
+}
+
+/* The native controls read to the second, and their scrub bar is a few hundred
+   milliseconds per pixel, so neither can place an in/out point. These give the
+   playhead to the millisecond and a way to walk it a frame at a time. */
+
+const NUDGE = 0.01;      // step size until the frame rate is known
+
+const timecode = (t) => {
+  const ms = Math.round(t * 1000);        // round first, or 59.9999s reads 0:60.000
+  const mins = Math.floor(ms / 60000);
+  return `${mins}:${((ms - mins * 60000) / 1000).toFixed(3).padStart(6, "0")}`;
+};
+
+function showPlayhead() {
+  const video = $("vid");
+  const rate = state.frameDur ? ` · ${(1 / state.frameDur).toFixed(2)} fps` : "";
+  $("playhead").textContent =
+    `${timecode(video.currentTime)} / ${timecode(video.duration || 0)}${rate}`;
+}
+
+function stepFrame(direction) {
+  const video = $("vid");
+  if (!video.duration) return;
+  video.pause();
+  const to = video.currentTime + direction * (state.frameDur || NUDGE);
+  video.currentTime = Math.min(Math.max(to, 0), video.duration);
+}
+
+/** Measure seconds-per-frame, which no browser exposes directly: each video
+ *  frame callback carries a presentation time and a frame counter, and the
+ *  ratio of their deltas is the frame duration.
+ *
+ *  Two things spoil a plain average of those gaps, and they pull opposite ways:
+ *
+ *  - Dropped frames. The counter is frames *presented*, and around startup it
+ *    reports one frame while the clock advances by two - so the +1 test does
+ *    not catch them and the gap comes out double. Drops can only ever inflate
+ *    a gap, never shrink one, which makes the smallest gap seen a sound anchor
+ *    for throwing the rest out.
+ *  - Millisecond quantisation. Container timestamps are whole milliseconds, so
+ *    24 fps is stored as 42, 41, 42... The minimum is therefore short every
+ *    time, and only averaging the cluster recovers the 41.67 in between.
+ *
+ *  Hence: anchor on the minimum, average everything close to it. Erring short
+ *  is the one thing to avoid - a step of 41 ms from a frame at 1.000 s targets
+ *  1.041, which is still inside that same frame, and the button sits still. */
+const GAP_CAP = 240;             // ~10 s of samples; a drifting rate stays current
+const GAP_NEAR = 1.3;            // beyond this, it's another frame's worth
+
+function watchFrames(video) {
+  if (!video.requestVideoFrameCallback) return;
+  let prev = null, gaps = [];
+  video.addEventListener("loadeddata", () => { prev = null; gaps = []; });
+
+  const tick = (_now, meta) => {
+    const playing = !video.paused && !video.seeking;
+    if (playing && prev && meta.presentedFrames - prev.frames === 1) {
+      const gap = meta.mediaTime - prev.time;
+      if (gap > 0.005 && gap < 0.5) {
+        gaps.push(gap);
+        if (gaps.length > GAP_CAP) gaps.shift();
+        const floor = Math.min(...gaps);
+        const clean = gaps.filter((g) => g < floor * GAP_NEAR);
+        state.frameDur = clean.reduce((a, b) => a + b, 0) / clean.length;
+      }
+    }
+    prev = playing ? { frames: meta.presentedFrames, time: meta.mediaTime } : null;
+    showPlayhead();
+    video.requestVideoFrameCallback(tick);
+  };
+  video.requestVideoFrameCallback(tick);
 }
 
 async function uploadVideo() {
@@ -800,13 +875,19 @@ function bindStep1() {
     pickFile(ev.dataTransfer.files[0]);
   };
 
-  $("setIn").onclick = () => { $("tStart").value = $("vid").currentTime.toFixed(2); syncRange(); };
-  $("setOut").onclick = () => { $("tEnd").value = $("vid").currentTime.toFixed(2); syncRange(); };
+  $("setIn").onclick = () => { $("tStart").value = $("vid").currentTime.toFixed(3); syncRange(); };
+  $("setOut").onclick = () => { $("tEnd").value = $("vid").currentTime.toFixed(3); syncRange(); };
   $("rangeReset").onclick = () => {
     $("tStart").value = 0;
-    $("tEnd").value = ($("vid").duration || 0).toFixed(2);
+    $("tEnd").value = ($("vid").duration || 0).toFixed(3);
     syncRange();
   };
+  $("stepBack").onclick = () => stepFrame(-1);
+  $("stepFwd").onclick = () => stepFrame(1);
+  // rVFC covers seeks where it exists; these keep the readout live without it.
+  $("vid").ontimeupdate = showPlayhead;
+  $("vid").onseeked = showPlayhead;
+  watchFrames($("vid"));
   $("tStart").oninput = syncRange;
   $("tEnd").oninput = syncRange;
 

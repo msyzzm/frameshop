@@ -32,11 +32,16 @@
 
     <div id="clip" hidden>
       <video id="vid" controls preload="metadata"></video>
+      <div class="bar">
+        <button id="stepBack" title="back one frame">&#9664;</button>
+        <button id="stepFwd" title="forward one frame">&#9654;</button>
+        <span id="playhead" class="mono">0:00.000</span>
+      </div>
       <div class="bar wrap">
         <button id="setIn">set in</button>
-        <input id="tStart" type="number" class="num" step="0.01" min="0" title="start, seconds">
+        <input id="tStart" type="number" class="num" step="0.001" min="0" title="start, seconds">
         <button id="setOut">set out</button>
-        <input id="tEnd" type="number" class="num" step="0.01" min="0" title="end, seconds">
+        <input id="tEnd" type="number" class="num" step="0.001" min="0" title="end, seconds">
         <button id="rangeReset" class="ghost">whole clip</button>
         <span class="spacer"></span>
         <span id="clipInfo" class="muted small mono"></span>
