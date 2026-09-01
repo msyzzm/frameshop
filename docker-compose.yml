@@ -1,5 +1,9 @@
 services:
   frameshop:
+    # Both keys on purpose. `up --build` builds locally and tags the result
+    # with this name; `pull` fetches the image CI published instead. Pin the
+    # tag to a release or a sha to stop `latest` moving under a deployment.
+    image: ghcr.io/msyzzm/frameshop:latest
     build: .
     # Published on every interface. FRAMESHOP_TOKEN is still required - the
     # server refuses to bind non-loopback without it - but Basic auth over
