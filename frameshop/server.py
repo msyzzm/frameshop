@@ -245,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         route = urlparse(self.path).path
         handlers = {"/api/export": self._export, "/api/autocrop": self._autocrop,
-                    "/api/open": self._open}
+                    "/api/open": self._open, "/api/delete": self._delete}
         if route != "/api/import" and route not in handlers:
             return self._send(404, b"not found", TEXT)
         if not self._authorised():
@@ -280,6 +280,34 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("no directory given")
         Handler.library = Library(self._within_root(directory))
         return self._frames_payload()
+
+    def _delete(self, request):
+        """Remove a project directory. Deliberately fussy about what qualifies.
+
+        Confined to the work root rather than --root: deletion is the one
+        operation where a mistyped path costs you something, and source
+        material may well live elsewhere under the root.
+        """
+        directory = os.path.abspath((request.get("directory") or "").strip())
+        workroot = self.workroot
+
+        try:
+            inside = os.path.commonpath([directory, workroot]) == workroot
+        except ValueError:                      # different drives on Windows
+            inside = False
+        if not inside or directory == workroot:
+            raise ValueError(f"only a project inside {workroot} can be deleted")
+
+        # "Has frames in it" is what separates a project from, say, a typo that
+        # happens to name a directory full of something else.
+        if not projects.summarise(directory):
+            raise ValueError(f"{directory} is not a project directory")
+
+        shutil.rmtree(directory)
+        if self.library and self.library.directory == directory:
+            Handler.library = None              # step 2 was showing what just went
+
+        return {"deleted": directory, "projects": projects.listing(workroot)}
 
     def _spool_upload(self, suffix):
         """Stream the request body to a temp file. Videos are too big to hold."""

@@ -94,6 +94,11 @@ The parameters and metrics live in a `frameshop.json` beside the frames,
 because none of it is recoverable from the images. A directory without one
 still opens; it just shows less.
 
+The `×` deletes a project from disk, after a confirmation naming it. Deletion
+is confined to the work root — tighter than `--root`, since source material may
+sit elsewhere under it — and refuses anything that isn't a directory of frames,
+so a mistyped path can't take out something else.
+
 ## Step 2 — picking
 
 **Picking.** Every frame starts picked. In the grid on the right:

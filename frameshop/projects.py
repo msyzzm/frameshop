@@ -29,8 +29,12 @@ def read(directory):
         return {}          # hand-made or pre-sidecar directory; still openable
 
 
-def _summarise(workroot, name):
-    directory = os.path.join(workroot, name)
+def summarise(directory):
+    """Describe a project directory, or None if it isn't one.
+
+    Also the guard for deletion: "has frames in it" is what separates a project
+    from an arbitrary directory someone typed.
+    """
     if not os.path.isdir(directory):
         return None
 
@@ -48,7 +52,7 @@ def _summarise(workroot, name):
     # Sidecar first so the measured values win if the two ever disagree.
     return {
         **read(directory),
-        "name": name,
+        "name": os.path.basename(directory),
         "directory": directory,
         "frames": len(frames),
         "bytes": total,
@@ -60,5 +64,5 @@ def listing(workroot):
     """Every keyed sequence under the work root, newest first."""
     if not os.path.isdir(workroot):
         return []
-    found = (_summarise(workroot, name) for name in os.listdir(workroot))
+    found = (summarise(os.path.join(workroot, n)) for n in os.listdir(workroot))
     return sorted((p for p in found if p), key=lambda p: p["modified"], reverse=True)

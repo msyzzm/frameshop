@@ -718,8 +718,33 @@ function projectRow(project) {
     <div class="proj-meta muted small mono">
       ${project.leak != null ? `<span class="${bad ? "err" : "ok"}">leak ${project.leak}</span>` : ""}
       <span>${when}</span>
-    </div>`;
+    </div>
+    <button class="proj-del ghost" title="delete this project">&times;</button>`;
+  row.querySelector(".proj-del").dataset.summary =
+    `${project.source || project.name} - ${project.frames} frames, ${(project.bytes / MB).toFixed(1)} MB`;
   return row;
+}
+
+async function deleteProject(directory, summary) {
+  if (!confirm(`Delete this project?\n\n${summary}\n${directory}\n\nThe frames are removed from disk. This cannot be undone.`)) return;
+  try {
+    const data = await api("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ directory }),
+    });
+    log(`deleted ${data.deleted}`, "ok");
+    loadProjects();
+    // Step 2 may have been showing the frames that just went.
+    if ($("dir").textContent === data.deleted) {
+      state.frames = [];
+      $("dir").textContent = "";
+      $("grid").innerHTML = "";
+      showStep(1);
+    }
+  } catch (err) {
+    log(err.message, "err");
+  }
 }
 
 async function loadProjects() {
@@ -758,7 +783,10 @@ function bindStep1() {
   $("projRefresh").onclick = loadProjects;
   $("projects").onclick = (ev) => {
     const row = ev.target.closest(".proj");
-    if (row) openDirectory(row.dataset.directory);
+    if (!row) return;
+    const del = ev.target.closest(".proj-del");
+    if (del) deleteProject(row.dataset.directory, del.dataset.summary);
+    else openDirectory(row.dataset.directory);
   };
 
   drop.onclick = () => file.click();

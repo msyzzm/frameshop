@@ -62,6 +62,11 @@ body:not(.step1) #step1 { display: none; }
 .proj-meta { display: grid; gap: 1px; text-align: right; white-space: nowrap; }
 .proj-meta .err { color: #ff7b72; }
 .proj-meta .ok { color: #6ee787; }
+.proj-del {
+  padding: 2px 8px; line-height: 1.2; font-size: 15px;
+  color: var(--muted); border-color: transparent;
+}
+.proj-del:hover { color: #ff7b72; border-color: #ff7b72; }
 
 button.step {
   background: transparent; border-color: transparent; color: var(--muted);
