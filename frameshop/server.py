@@ -16,6 +16,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 import zipfile
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import export as exporters
 from . import key
+from . import projects
 from . import transform
 from .jobs import Runner
 from .library import PREVIEW_MAX, THUMB_MAX, Library
@@ -135,6 +137,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self._frames_payload())
             if route == "/api/job":
                 return self._json(200, self.jobs.status)
+            if route == "/api/projects":
+                return self._json(200, {"workroot": self.workroot,
+                                        "projects": projects.listing(self.workroot)})
             if route in ("/api/thumb", "/api/preview"):
                 longest = THUMB_MAX if route == "/api/thumb" else PREVIEW_MAX
                 return self._rendition(query, longest)
@@ -315,17 +320,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": str(exc)})
 
         def work(progress):
+            end = arg("end")
+            start, lo, hi = (float(arg("start", "0")),
+                             float(arg("lo", key.DEFAULT_LO)),
+                             float(arg("hi", key.DEFAULT_HI)))
             try:
-                end = arg("end")
                 result = key.key_video(
                     video, outdir,
-                    start=float(arg("start", "0")),
-                    end=float(end) if end else None,
-                    lo=float(arg("lo", key.DEFAULT_LO)),
-                    hi=float(arg("hi", key.DEFAULT_HI)),
-                    progress=progress)
+                    start=start, end=float(end) if end else None,
+                    lo=lo, hi=hi, progress=progress)
             finally:
                 os.unlink(video)            # the upload was only ever a scratch copy
+
+            # Record what produced this, so the projects list can show more than
+            # a folder name. None of it is recoverable from the frames.
+            projects.write(result["directory"], {
+                "source": filename,
+                "start": start,
+                "end": float(end) if end else None,
+                "lo": lo, "hi": hi,
+                "created": time.time(),
+                **result,
+            })
             Handler.library = Library(result["directory"])
             return result
 

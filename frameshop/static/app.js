@@ -630,6 +630,7 @@ async function pollJob() {
     // A high leak means the plate was not really a green screen; say so, since
     // the frames will look fine in the grid and wrong the moment you composite.
     if (job.leak > 10) log(`leak ${job.leak}/255 is high - was that really a green screen?`, "err");
+    loadProjects();
     return openLibrary({ directory: job.directory });
   }
 }
@@ -695,9 +696,70 @@ async function uploadVideo() {
   }
 }
 
+const MB = 1048576;
+
+function projectRow(project) {
+  const row = document.createElement("div");
+  row.className = "proj";
+  row.dataset.directory = project.directory;
+
+  const span = project.end != null ? `${project.start ?? 0}-${project.end}s` : "whole clip";
+  const when = new Date((project.created || project.modified) * 1000).toLocaleString();
+  // Surface leak here too: a badly keyed project looks perfectly fine as
+  // thumbnails and only betrays itself once you composite it.
+  const bad = project.leak > 10;
+
+  row.innerHTML = `
+    <div class="proj-main">
+      <strong>${project.source || project.name}</strong>
+      <span class="muted small">${project.frames} frames &middot;
+        ${(project.bytes / MB).toFixed(1)} MB &middot; ${span}</span>
+    </div>
+    <div class="proj-meta muted small mono">
+      ${project.leak != null ? `<span class="${bad ? "err" : "ok"}">leak ${project.leak}</span>` : ""}
+      <span>${when}</span>
+    </div>`;
+  return row;
+}
+
+async function loadProjects() {
+  const box = $("projects");
+  try {
+    const data = await api("/api/projects");
+    $("projRoot").textContent = data.workroot;
+    box.innerHTML = "";
+    if (!data.projects.length) {
+      box.innerHTML = '<div class="muted small">nothing keyed yet</div>';
+      return;
+    }
+    data.projects.forEach((p) => box.appendChild(projectRow(p)));
+  } catch (err) {
+    box.innerHTML = "";
+    box.textContent = err.message;
+  }
+}
+
+async function openDirectory(directory) {
+  try {
+    await openLibrary(await api("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ directory }),
+    }));
+  } catch (err) {
+    setKeyStatus(err.message, "err");
+  }
+}
+
 function bindStep1() {
   const drop = $("drop");
   const file = $("file");
+
+  $("projRefresh").onclick = loadProjects;
+  $("projects").onclick = (ev) => {
+    const row = ev.target.closest(".proj");
+    if (row) openDirectory(row.dataset.directory);
+  };
 
   drop.onclick = () => file.click();
   file.onchange = () => pickFile(file.files[0]);
@@ -721,17 +783,7 @@ function bindStep1() {
   $("tEnd").oninput = syncRange;
 
   $("keyGo").onclick = () => uploadVideo();
-  $("openGo").onclick = async () => {
-    try {
-      await openLibrary(await api("/api/open", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ directory: $("openDir").value }),
-      }));
-    } catch (err) {
-      setKeyStatus(err.message, "err");
-    }
-  };
+  $("openGo").onclick = () => openDirectory($("openDir").value);
 
   $("tab1").onclick = () => showStep(1);
   $("tab2").onclick = () => showStep(2);
@@ -778,6 +830,7 @@ async function boot() {
   $("workroot").value = data.workroot || "";
   if (!data.ffmpeg) setKeyStatus("ffmpeg/ffprobe not on PATH - step 1 is unavailable", "err");
 
+  loadProjects();
   if (data.frames.length) await openLibrary(data);
   else showStep(1);
 }

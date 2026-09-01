@@ -50,6 +50,19 @@ body:not(.step1) #step1 { display: none; }
 #clip[hidden] { display: none; }
 #vid { width: 100%; max-height: 340px; background: #000; border-radius: 6px; }
 
+#projects { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; }
+.proj {
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 10px; border: 1px solid var(--line); border-radius: 5px;
+  cursor: pointer;
+}
+.proj:hover { border-color: var(--accent); background: #4a9eff14; }
+.proj-main { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.proj-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-meta { display: grid; gap: 1px; text-align: right; white-space: nowrap; }
+.proj-meta .err { color: #ff7b72; }
+.proj-meta .ok { color: #6ee787; }
+
 button.step {
   background: transparent; border-color: transparent; color: var(--muted);
 }

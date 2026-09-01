@@ -75,9 +75,24 @@ When it finishes you get the numbers that say whether it worked:
 - **core alpha** — mean alpha where the plate was unambiguously subject. Must
   be 1.0; below that the key is eating the subject, so lower `lo`.
 
-The screen colour is sampled once, from the four corners of the first frame, so
-the plate has to be static and reasonably even. Synthetic and AI-generated
-plates are. A hand-held shot with a drifting gradient is not.
+The screen colour is the median of the four corner patches, taken over frames
+spread through the clip — not just the first one, which is a bad sole witness:
+clips routinely open on a fade or an unsettled exposure, and one wrong reading
+poisons the subtraction on every frame.
+
+It is still a single colour for the whole clip, so the plate has to be static
+and reasonably even. Synthetic and AI-generated plates are. A hand-held shot
+with a drifting gradient is not.
+
+## Projects
+
+Every keyed sequence lands in the work root and is listed on step 1, newest
+first, with its source clip, span, frame count and leak. Click one to reopen it
+in step 2 — the frames are just PNGs, so nothing is tied to a session.
+
+The parameters and metrics live in a `frameshop.json` beside the frames,
+because none of it is recoverable from the images. A directory without one
+still opens; it just shows less.
 
 ## Step 2 — picking
 
