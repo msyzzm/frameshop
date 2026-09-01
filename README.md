@@ -36,9 +36,17 @@ UI says so up front if they are missing, and step 2 works without them.
 Drop a clip (or click to choose, or paste a folder path to skip straight to step
 2 with frames you already have).
 
+Nothing is uploaded on drop. The clip plays straight from your machine so you
+can scrub it and mark the part you actually want; `Key it` then uploads and
+keys that span only. `set in` / `set out` take the current playhead, and the
+two boxes accept typed seconds.
+
+If the browser can't decode the container — some things ffmpeg handles happily,
+no browser will — the preview hides itself and the whole clip is keyed.
+
 | Field | Meaning |
 |---|---|
-| `trim` | drop this many frames off the front — AI clips often open on a bad beat |
+| in / out | the span to key, in seconds. Empty means the whole clip |
 | `lo` | `G-max(R,B)` at/below which a pixel is fully opaque (default 8) |
 | `hi` | `G-max(R,B)` at/above which a pixel is fully transparent (default 45) |
 | `out` | where the `<name>_keyed_png/` folder is written |

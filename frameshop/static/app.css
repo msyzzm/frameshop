@@ -46,6 +46,10 @@ body:not(.step1) #step1 { display: none; }
 }
 #drop:hover, #drop.over { border-color: var(--accent); background: #4a9eff14; }
 
+#clip { display: grid; gap: 8px; }
+#clip[hidden] { display: none; }
+#vid { width: 100%; max-height: 340px; background: #000; border-radius: 6px; }
+
 button.step {
   background: transparent; border-color: transparent; color: var(--muted);
 }

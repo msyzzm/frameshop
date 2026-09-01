@@ -49,10 +49,20 @@ def probe_fps(path):
     return float(num) / float(den)
 
 
-def decode(video, dest, trim=0):
-    cmd = ["ffmpeg", "-y", "-v", "error", "-i", video]
-    if trim:
-        cmd += ["-vf", f"select=gte(n\\,{trim}),setpts=PTS-STARTPTS"]
+def decode(video, dest, start=0.0, end=None):
+    """Decode [start, end) seconds to a PNG sequence.
+
+    -ss goes before -i so ffmpeg seeks the input instead of decoding and
+    throwing away everything up to that point, and the span is given as a
+    duration after it, which leaves no doubt about what -to would be relative
+    to.
+    """
+    cmd = ["ffmpeg", "-y", "-v", "error"]
+    if start > 0:
+        cmd += ["-ss", f"{start:.3f}"]
+    cmd += ["-i", video]
+    if end is not None and end > start:
+        cmd += ["-t", f"{end - start:.3f}"]
     subprocess.run(cmd + [os.path.join(dest, "%05d.png")], check=True)
 
 
@@ -77,14 +87,15 @@ def key_frame(rgb, bg, lo, hi):
     return np.dstack([straight, a * 255.0]).astype(np.uint8), premult, a[..., 0], diff
 
 
-def key_video(video, outdir, trim=0, lo=DEFAULT_LO, hi=DEFAULT_HI, progress=None):
+def key_video(video, outdir, start=0.0, end=None, lo=DEFAULT_LO, hi=DEFAULT_HI,
+              progress=None):
     if not have_ffmpeg():
         raise RuntimeError("ffmpeg and ffprobe have to be on PATH to import a video")
 
     os.makedirs(outdir, exist_ok=True)
     work = tempfile.mkdtemp(prefix="frameshop_decode_")
     try:
-        decode(video, work, trim)
+        decode(video, work, start, end)
         names = sorted(os.listdir(work))
         if not names:
             raise RuntimeError("ffmpeg decoded no frames from that file")

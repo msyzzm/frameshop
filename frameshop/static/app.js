@@ -12,6 +12,8 @@ const state = {
   crop: null,          // {x, y, w, h} in source pixels
   zoom: 0,             // 0 = fit to the pane; otherwise an absolute scale
   playing: false,
+  clip: null,          // step 1: the File, held back until you press Key it
+  clipUrl: "",         // its object URL, for local preview
 };
 
 const MIN_ZOOM = 0.05;
@@ -632,14 +634,57 @@ async function pollJob() {
   }
 }
 
-async function uploadVideo(file) {
+/** Preview the file the browser is already holding - no upload, no server
+ *  round trip, and nothing transferred for a clip you end up discarding. */
+function pickFile(file) {
+  if (!file) return;
+  if (state.clipUrl) URL.revokeObjectURL(state.clipUrl);
+
+  state.clip = file;
+  state.clipUrl = URL.createObjectURL(file);
+
+  const video = $("vid");
+  video.src = state.clipUrl;
+  $("clip").hidden = false;
+  $("drop").querySelector("strong").textContent = file.name;
+
+  video.onloadedmetadata = () => {
+    $("tStart").value = 0;
+    $("tEnd").value = video.duration.toFixed(2);
+    syncRange();
+  };
+  // Some containers ffmpeg handles happily are ones no browser will decode.
+  video.onerror = () => {
+    $("clip").hidden = true;
+    setKeyStatus("this browser can't preview that container - keying still works");
+  };
+  setKeyStatus(`${(file.size / 1048576).toFixed(1)} MB ready - pick a range, then Key it`);
+}
+
+function syncRange() {
+  const start = Number($("tStart").value) || 0;
+  const end = Number($("tEnd").value) || 0;
+  const whole = $("vid").duration || 0;
+  const span = Math.max(0, end - start);
+  $("clipInfo").textContent = span
+    ? `${span.toFixed(2)}s of ${whole.toFixed(2)}s`
+    : `${whole.toFixed(2)}s`;
+}
+
+async function uploadVideo() {
+  const file = state.clip;
+  if (!file) return $("file").click();
+
+  const start = Number($("tStart").value) || 0;
+  const end = Number($("tEnd").value) || 0;
   const params = new URLSearchParams({
     name: file.name,
-    trim: $("trim").value || 0,
+    start,
     lo: $("lo").value || 8,
     hi: $("hi").value || 45,
     outdir: $("workroot").value || "",
   });
+  if (end > start) params.set("end", end);
 
   setKeyStatus(`uploading ${(file.size / 1048576).toFixed(1)} MB…`);
   try {
@@ -655,18 +700,27 @@ function bindStep1() {
   const file = $("file");
 
   drop.onclick = () => file.click();
-  file.onchange = () => file.files[0] && uploadVideo(file.files[0]);
+  file.onchange = () => pickFile(file.files[0]);
 
   drop.ondragover = (ev) => { ev.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
   drop.ondrop = (ev) => {
     ev.preventDefault();
     drop.classList.remove("over");
-    const dropped = ev.dataTransfer.files[0];
-    if (dropped) uploadVideo(dropped);
+    pickFile(ev.dataTransfer.files[0]);
   };
 
-  $("keyGo").onclick = () => (file.files[0] ? uploadVideo(file.files[0]) : file.click());
+  $("setIn").onclick = () => { $("tStart").value = $("vid").currentTime.toFixed(2); syncRange(); };
+  $("setOut").onclick = () => { $("tEnd").value = $("vid").currentTime.toFixed(2); syncRange(); };
+  $("rangeReset").onclick = () => {
+    $("tStart").value = 0;
+    $("tEnd").value = ($("vid").duration || 0).toFixed(2);
+    syncRange();
+  };
+  $("tStart").oninput = syncRange;
+  $("tEnd").oninput = syncRange;
+
+  $("keyGo").onclick = () => uploadVideo();
   $("openGo").onclick = async () => {
     try {
       await openLibrary(await api("/api/open", {

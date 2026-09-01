@@ -30,9 +30,20 @@
       <input id="file" type="file" accept="video/*" hidden>
     </div>
 
+    <div id="clip" hidden>
+      <video id="vid" controls preload="metadata"></video>
+      <div class="bar wrap">
+        <button id="setIn">set in</button>
+        <input id="tStart" type="number" class="num" step="0.01" min="0" title="start, seconds">
+        <button id="setOut">set out</button>
+        <input id="tEnd" type="number" class="num" step="0.01" min="0" title="end, seconds">
+        <button id="rangeReset" class="ghost">whole clip</button>
+        <span class="spacer"></span>
+        <span id="clipInfo" class="muted small mono"></span>
+      </div>
+    </div>
+
     <div class="bar wrap">
-      <label>trim <input id="trim" type="number" class="num" value="0" min="0"
-                         title="drop this many frames off the front"></label>
       <label>lo <input id="lo" type="number" class="num" value="8" step="1"
                        title="G-max(R,B) at/below which a pixel is fully opaque"></label>
       <label>hi <input id="hi" type="number" class="num" value="45" step="1"

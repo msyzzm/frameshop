@@ -316,9 +316,11 @@ class Handler(BaseHTTPRequestHandler):
 
         def work(progress):
             try:
+                end = arg("end")
                 result = key.key_video(
                     video, outdir,
-                    trim=int(arg("trim", "0")),
+                    start=float(arg("start", "0")),
+                    end=float(end) if end else None,
                     lo=float(arg("lo", key.DEFAULT_LO)),
                     hi=float(arg("hi", key.DEFAULT_HI)),
                     progress=progress)
