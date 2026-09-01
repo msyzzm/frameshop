@@ -210,7 +210,7 @@ Running it by hand instead:
 ```bash
 docker build -t frameshop .
 docker run -d --name frameshop \
-  -p 127.0.0.1:8765:8765 \
+  -p 8765:8765 \
   -e FRAMESHOP_TOKEN="$FRAMESHOP_TOKEN" \
   -v "$PWD/data:/data" \
   frameshop
