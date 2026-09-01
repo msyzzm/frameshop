@@ -1,11 +1,15 @@
 services:
   frameshop:
     build: .
-    # Bound to the host's loopback on purpose. Basic auth over plain HTTP is a
-    # lock, not a tunnel: put a TLS-terminating proxy or a VPN in front before
-    # you widen this to "8765:8765".
+    # Published on every interface. FRAMESHOP_TOKEN is still required - the
+    # server refuses to bind non-loopback without it - but Basic auth over
+    # plain HTTP is a lock, not a tunnel: the password crosses the wire in the
+    # clear. Terminate TLS in front of this, or keep it on a private network.
+    #
+    # On Linux, publishing a port writes iptables rules that bypass ufw, so a
+    # "deny incoming" policy will not cover this.
     ports:
-      - "127.0.0.1:8765:8765"
+      - "8765:8765"
     environment:
       # No default. Compose fails loudly rather than starting it unprotected.
       FRAMESHOP_TOKEN: ${FRAMESHOP_TOKEN:?set FRAMESHOP_TOKEN before starting}

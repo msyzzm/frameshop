@@ -192,10 +192,18 @@ UID=$(id -u) GID=$(id -g) docker compose up -d
 The server checks the work directory is writable at startup and refuses to come
 up otherwise, rather than failing partway through your first import.
 
-The compose file publishes on the host's **loopback** only. To reach it from
-another machine, tunnel (`ssh -L 8765:localhost:8765 server`) or put a
-TLS-terminating reverse proxy in front. Widening the mapping to `8765:8765`
-puts a plaintext password on the wire.
+The compose file publishes on **every interface**, so the box is reachable from
+anywhere that can route to it. `FRAMESHOP_TOKEN` is mandatory — the server
+refuses a non-loopback bind without one — but Basic auth over plain HTTP is a
+lock, not a tunnel: the password crosses the wire in the clear. Put TLS in
+front of it, or keep it on a private network.
+
+Two things worth knowing if it faces anything untrusted:
+
+- On Linux, publishing a port writes iptables rules that **bypass ufw**. A
+  `deny incoming` policy will not cover this.
+- To keep it private instead, bind the mapping back to loopback
+  (`"127.0.0.1:8765:8765"`) and tunnel: `ssh -L 8765:localhost:8765 server`.
 
 Running it by hand instead:
 
