@@ -73,6 +73,21 @@ def screen_colour(rgb):
     return np.median(corners, 0)
 
 
+def screen_colour_over(paths, samples=9):
+    """Median corner colour across frames spread through the clip.
+
+    Frame 1 is a bad sole witness. Clips routinely open on a fade or an
+    unsettled exposure - one measured here read [5, 218, 28] on frame 1 against
+    a steady [39, 152, 55] by frame 6 - and one wrong BG then poisons the
+    subtraction on every frame, which surfaces as a large leak.
+    """
+    step = max(1, len(paths) // samples)
+    picked = paths[::step][:samples] or paths[:1]
+    corners = [screen_colour(np.asarray(Image.open(p).convert("RGB")).astype(np.float32))
+               for p in picked]
+    return np.median(np.stack(corners), 0)
+
+
 def key_frame(rgb, bg, lo, hi):
     """-> (straight RGBA uint8, premultiplied float, alpha float, difference float)"""
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
@@ -100,13 +115,11 @@ def key_video(video, outdir, start=0.0, end=None, lo=DEFAULT_LO, hi=DEFAULT_HI,
         if not names:
             raise RuntimeError("ffmpeg decoded no frames from that file")
 
-        bg = None
+        bg = screen_colour_over([os.path.join(work, n) for n in names])
+
         leaks, cores = [], []
         for i, name in enumerate(names):
             rgb = np.asarray(Image.open(os.path.join(work, name)).convert("RGB")).astype(np.float32)
-            if bg is None:
-                bg = screen_colour(rgb)
-
             rgba, premult, alpha, diff = key_frame(rgb, bg, lo, hi)
             Image.fromarray(rgba).save(os.path.join(outdir, name))
 
