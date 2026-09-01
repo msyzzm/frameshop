@@ -801,7 +801,7 @@ function projectRow(project) {
 }
 
 async function deleteProject(directory, summary) {
-  if (!confirm(`Delete this project?\n\n${summary}\n${directory}\n\nThe frames are removed from disk. This cannot be undone.`)) return;
+  if (!confirm(`Delete this project?\n\n${summary}\n${directory}\n\nThe frames go, and so does anything exported into it. This cannot be undone.`)) return;
   try {
     const data = await api("/api/delete", {
       method: "POST",
@@ -915,10 +915,14 @@ async function openLibrary(data) {
 
   $("dir").textContent = data.directory;
   $("stem").value = data.directory.split(/[\\/]/).filter(Boolean).pop() || "frames";
-  // Follow the server's separator. A hard-coded backslash builds a directory
-  // literally named "work\frameshop_out" when the server runs on Linux.
+  // Inside the project, not beside it. A sheet and an APNG are .png files, so
+  // an export folder sitting in the work root is a directory of images - which
+  // is all "a project" is to the scanner, and it turns up in the list as one.
+  // Under the project it also travels with it, and is deleted with it.
+  // Separator follows the server's: a hard-coded backslash builds a directory
+  // literally named "hero_keyed_png\export" when the server runs on Linux.
   const sep = data.directory.includes("\\") ? "\\" : "/";
-  $("outdir").value = data.directory.replace(/[\\/][^\\/]*$/, "") + sep + "frameshop_out";
+  $("outdir").value = data.directory.replace(/[\\/]+$/, "") + sep + "export";
   $("scrub").max = state.frames.length - 1;
   if (!data.uniform) log("frames are not all the same size - set an explicit size before export", "err");
 

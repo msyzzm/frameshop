@@ -100,12 +100,15 @@ in step 2 — the frames are just PNGs, so nothing is tied to a session.
 
 The parameters and metrics live in a `frameshop.json` beside the frames,
 because none of it is recoverable from the images. A directory without one
-still opens; it just shows less.
+still opens by path; it just isn't listed. "Directory of images" is too loose
+a test for the work root — a sprite sheet and an APNG are both `.png`, so an
+export folder would otherwise be listed as a project whose frames are a sheet.
 
 The `×` deletes a project from disk, after a confirmation naming it. Deletion
 is confined to the work root — tighter than `--root`, since source material may
 sit elsewhere under it — and refuses anything that isn't a directory of frames,
-so a mistyped path can't take out something else.
+so a mistyped path can't take out something else. Exports default to a folder
+inside the project, so they go with it.
 
 ## Step 2 — picking
 
@@ -151,7 +154,10 @@ keeps them proportional. `reset` snaps back.
 
 ## Output
 
-Pick a name and an output folder, tick formats, hit Export.
+Pick a name and an output folder, tick formats, hit Export. The folder
+defaults to `export/` inside the project — beside it would put a directory of
+`.png` files in the work root, which the project list would then show as a
+project of its own.
 
 | Format | Files | Notes |
 |---|---|---|

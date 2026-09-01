@@ -61,8 +61,17 @@ def summarise(directory):
 
 
 def listing(workroot):
-    """Every keyed sequence under the work root, newest first."""
+    """Every keyed sequence under the work root, newest first.
+
+    Sidecar required, which `summarise` does not insist on. "Directory of
+    images" is too loose a test for the work root, because an export folder is
+    one too - a sprite sheet and an APNG are both .png - and it would be listed
+    as a project whose frames are a sheet. The list is what frameshop keyed;
+    anything else is opened by path.
+    """
     if not os.path.isdir(workroot):
         return []
-    found = (summarise(os.path.join(workroot, n)) for n in os.listdir(workroot))
+    paths = (os.path.join(workroot, n) for n in os.listdir(workroot))
+    found = (summarise(p) for p in paths
+             if os.path.exists(os.path.join(p, SIDECAR)))
     return sorted((p for p in found if p), key=lambda p: p["modified"], reverse=True)
